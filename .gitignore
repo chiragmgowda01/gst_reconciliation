@@ -1,0 +1,18 @@
+# Python
+backend/venv/
+backend/**/__pycache__/
+*.pyc
+
+# Environment variables
+backend/.env
+
+# React
+frontend/node_modules/
+frontend/dist/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
