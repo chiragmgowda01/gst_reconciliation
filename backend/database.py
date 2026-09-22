@@ -1,27 +1,14 @@
 import os
-
+from pathlib import Path
 from dotenv import load_dotenv
-from sqlalchemy import URL, create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
 
-load_dotenv()
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(env_path)
 
-db_url = URL.create(
-    "postgresql+psycopg",
-    username=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-    host=os.getenv("DB_HOST"),
-    port=int(os.getenv("DB_PORT", "5432")),
-    database=os.getenv("DB_NAME"),
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(
-    db_url,
-    pool_pre_ping=True
-)
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL not found in backend/.env")
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False
-)
+engine = create_engine(DATABASE_URL)
