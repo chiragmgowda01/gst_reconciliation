@@ -1,187 +1,283 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import "./App.css";
+import { api, authStorage } from "./api/client";
+import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
+import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
+import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { ErrorState } from "./components/ErrorState";
 
-function App() {
-  const [data, setData] = useState(null);
+import { LoginPage } from "./pages/LoginPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { SalesReconciliationPage } from "./pages/SalesReconciliationPage";
+import { PurchaseReconciliationPage } from "./pages/PurchaseReconciliationPage";
+import { Gstr3bPage } from "./pages/Gstr3bPage";
+import { AnomaliesPage } from "./pages/AnomaliesPage";
+import { InvoicesPage } from "./pages/InvoicesPage";
+import { UploadPage } from "./pages/UploadPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { SettingsPage } from "./pages/SettingsPage";
+
+export function App() {
+  const [user, setUser] = useState(null);
+  const [businesses, setBusinesses] = useState([]);
+  const [activeBusiness, setActiveBusiness] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  const [currentTab, setCurrentTab] = useState("dashboard");
+  const [reconciliationData, setReconciliationData] = useState(null);
   const [gstr3b, setGstr3b] = useState(null);
+  const [anomalies, setAnomalies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    Promise.all([
-      fetch("http://localhost:8000/reconcile"),
-      fetch("http://localhost:8000/gstr3b/summary")
-    ])
-      .then(async ([r1, r2]) => {
-        if (!r1.ok || !r2.ok) {
-          throw new Error("Backend API error");
-        }
+  const loadDashboardData = useCallback(async (showRefreshing = false) => {
+    if (showRefreshing) setIsRefreshing(true);
+    else setLoading(true);
+    setError("");
 
-        const reconciliation = await r1.json();
-        const summary = await r2.json();
+    try {
+      const [recRes, gstr3bRes, anomRes] = await Promise.all([
+        api.getReconciliation(),
+        api.getGstr3bSummary(),
+        api.getAnomalies(),
+      ]);
 
-        setData(reconciliation);
-        setGstr3b(summary);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      setReconciliationData(recRes);
+      setGstr3b(gstr3bRes);
+      setAnomalies(anomRes?.items || []);
+    } catch (err) {
+      setError(err.message || "Failed to communicate with the GST reconciliation server.");
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
   }, []);
 
-  if (loading) {
-    return <h2 className="loading">Loading GST data...</h2>;
+  // Initial Auth Check
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = authStorage.getToken();
+      if (!token) {
+        setIsAuthChecking(false);
+        return;
+      }
+
+      try {
+        const me = await api.getMe();
+        setUser(me.user);
+        setBusinesses(me.businesses || []);
+
+        const savedBizId = authStorage.getActiveBusinessId();
+        const found = me.businesses?.find((b) => String(b.id) === String(savedBizId));
+        const initialBiz = found || me.businesses?.[0] || null;
+
+        setActiveBusiness(initialBiz);
+        if (initialBiz) {
+          authStorage.setActiveBusinessId(initialBiz.id);
+        }
+      } catch {
+        authStorage.clear();
+        setUser(null);
+      } finally {
+        setIsAuthChecking(false);
+      }
+    };
+
+    checkAuth();
+
+    const handleUnauthorized = () => {
+      setUser(null);
+      setBusinesses([]);
+      setActiveBusiness(null);
+    };
+
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+  }, []);
+
+  // When active business changes and user is authenticated, fetch dashboard data
+  useEffect(() => {
+    if (!user || !activeBusiness) return;
+    let ignore = false;
+
+    Promise.all([
+      api.getReconciliation(),
+      api.getGstr3bSummary(),
+      api.getAnomalies(),
+    ])
+      .then(([recRes, gstr3bRes, anomRes]) => {
+        if (!ignore) {
+          setReconciliationData(recRes);
+          setGstr3b(gstr3bRes);
+          setAnomalies(anomRes?.items || []);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setError(err.message || "Failed to communicate with the GST reconciliation server.");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [user, activeBusiness]);
+
+  const handleLoginSuccess = (userData, userBusinesses) => {
+    setUser(userData);
+    setBusinesses(userBusinesses || []);
+    const initialBiz = userBusinesses?.[0] || null;
+    setActiveBusiness(initialBiz);
+    if (initialBiz) {
+      authStorage.setActiveBusinessId(initialBiz.id);
+    }
+    setCurrentTab("dashboard");
+  };
+
+  const handleLogout = async () => {
+    await api.logout();
+    setUser(null);
+    setBusinesses([]);
+    setActiveBusiness(null);
+    setReconciliationData(null);
+    setGstr3b(null);
+    setAnomalies([]);
+  };
+
+  const handleSelectBusiness = (biz) => {
+    setActiveBusiness(biz);
+    authStorage.setActiveBusinessId(biz.id);
+  };
+
+  const handleBusinessAdded = (newBiz) => {
+    setBusinesses((prev) => [...prev, newBiz]);
+  };
+
+  if (isAuthChecking) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <LoadingSkeleton />
+      </div>
+    );
   }
 
-  if (error) {
-    return <h2 className="error">Error: {error}</h2>;
+  if (!user) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
-  const sales = data?.sales || [];
-  const purchases = data?.purchases || [];
-
-  const all = [...sales, ...purchases];
-
-  const matched = all.filter((x) => x.status === "MATCH").length;
-  const mismatched = all.filter((x) => x.status === "MISMATCH").length;
-  const missing = all.filter((x) => x.status === "MISSING_IN_GST").length;
-  const extra = all.filter((x) => x.status === "EXTRA_IN_GST").length;
+  const sales = reconciliationData?.sales || [];
+  const purchases = reconciliationData?.purchases || [];
 
   return (
-    <div className="app">
+    <div className="app-container">
+      {/* Sidebar Navigation */}
+      <Sidebar
+        currentTab={currentTab}
+        setCurrentTab={setCurrentTab}
+        anomalyCount={anomalies.length}
+        user={user}
+        activeBusiness={activeBusiness}
+        onLogout={handleLogout}
+      />
 
-      <header>
-        <h1>GST Reconciliation System</h1>
-        <p>
-          Automated MSME GST Reconciliation and Anomaly Detector
-        </p>
-      </header>
+      {/* Main Content Area */}
+      <div className="main-wrapper">
+        <TopBar
+          currentTab={currentTab}
+          onRefresh={() => loadDashboardData(true)}
+          isRefreshing={isRefreshing}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onOpenNotifications={() => setCurrentTab("anomalies")}
+          businesses={businesses}
+          activeBusiness={activeBusiness}
+          onSelectBusiness={handleSelectBusiness}
+          onBusinessAdded={handleBusinessAdded}
+          onLogout={handleLogout}
+        />
 
-      <div className="cards">
+        <main className="page-content">
+          {loading ? (
+            <LoadingSkeleton />
+          ) : error ? (
+            <ErrorState error={error} onRetry={() => loadDashboardData(false)} />
+          ) : (
+            <>
+              {currentTab === "dashboard" && (
+                <DashboardPage
+                  data={reconciliationData}
+                  gstr3b={gstr3b}
+                  anomalies={anomalies}
+                  onSelectInvoice={setSelectedInvoice}
+                  onNavigate={setCurrentTab}
+                />
+              )}
 
-        <div className="card">
-          <h3>Total Records</h3>
-          <h2>{all.length}</h2>
-        </div>
+              {currentTab === "sales" && (
+                <SalesReconciliationPage
+                  sales={sales}
+                  onSelectInvoice={setSelectedInvoice}
+                />
+              )}
 
-        <div className="card">
-          <h3>Matched</h3>
-          <h2>{matched}</h2>
-        </div>
+              {currentTab === "purchase" && (
+                <PurchaseReconciliationPage
+                  purchases={purchases}
+                  onSelectInvoice={setSelectedInvoice}
+                />
+              )}
 
-        <div className="card">
-          <h3>Mismatched</h3>
-          <h2>{mismatched}</h2>
-        </div>
+              {currentTab === "gstr3b" && (
+                <Gstr3bPage
+                  gstr3b={gstr3b}
+                  sales={sales}
+                  purchases={purchases}
+                />
+              )}
 
-        <div className="card">
-          <h3>Missing</h3>
-          <h2>{missing}</h2>
-        </div>
+              {currentTab === "anomalies" && (
+                <AnomaliesPage
+                  anomalies={anomalies}
+                />
+              )}
 
-        <div className="card">
-          <h3>Extra</h3>
-          <h2>{extra}</h2>
-        </div>
+              {currentTab === "invoices" && (
+                <InvoicesPage
+                  onSelectInvoice={setSelectedInvoice}
+                />
+              )}
 
+              {currentTab === "upload" && (
+                <UploadPage
+                  onUploadSuccess={() => loadDashboardData(true)}
+                />
+              )}
+
+              {currentTab === "reports" && (
+                <ReportsPage />
+              )}
+
+              {currentTab === "settings" && (
+                <SettingsPage />
+              )}
+            </>
+          )}
+        </main>
       </div>
 
-      <section>
-        <h2>Sales Reconciliation</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice No</th>
-              <th>Status</th>
-              <th>Taxable Difference</th>
-              <th>GST Difference</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {sales.map((row) => (
-              <tr key={row.invoice_no}>
-                <td>{row.invoice_no}</td>
-                <td>
-                  <span className={"status " + row.status}>
-                    {row.status}
-                  </span>
-                </td>
-                <td>{row.taxable_value_diff ?? "-"}</td>
-                <td>{row.gst_amount_diff ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>Purchase Reconciliation</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice No</th>
-              <th>Status</th>
-              <th>Taxable Difference</th>
-              <th>GST Difference</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {purchases.map((row) => (
-              <tr key={row.invoice_no}>
-                <td>{row.invoice_no}</td>
-                <td>
-                  <span className={"status " + row.status}>
-                    {row.status}
-                  </span>
-                </td>
-                <td>{row.taxable_value_diff ?? "-"}</td>
-                <td>{row.gst_amount_diff ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>GSTR-3B Summary</h2>
-
-        {gstr3b && (
-          <div className="cards">
-
-            <div className="card">
-              <h3>Tax Period</h3>
-              <h2>{gstr3b.tax_period}</h2>
-            </div>
-
-            <div className="card">
-              <h3>Output Tax</h3>
-              <h2>₹{gstr3b.output_tax}</h2>
-            </div>
-
-            <div className="card">
-              <h3>Eligible ITC</h3>
-              <h2>₹{gstr3b.eligible_itc}</h2>
-            </div>
-
-            <div className="card">
-              <h3>ITC Reversed</h3>
-              <h2>₹{gstr3b.itc_reversed}</h2>
-            </div>
-
-            <div className="card">
-              <h3>Net ITC</h3>
-              <h2>₹{gstr3b.net_itc}</h2>
-            </div>
-
-          </div>
-        )}
-      </section>
-
+      {/* Side-by-side Inspection Modal */}
+      {selectedInvoice && (
+        <InvoiceDetailModal
+          invoice={selectedInvoice}
+          onClose={() => setSelectedInvoice(null)}
+        />
+      )}
     </div>
   );
 }
