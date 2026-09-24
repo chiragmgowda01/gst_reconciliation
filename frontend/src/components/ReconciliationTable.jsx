@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Eye, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Eye, ArrowUpDown, ChevronLeft, ChevronRight, Search, Filter } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 
 export function ReconciliationTable({ records = [], onSelectInvoice, title, subtitle }) {
@@ -86,7 +86,7 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
   };
 
   return (
-    <div className="card">
+    <div className="institutional-card">
       <div className="card-header">
         <div>
           <h3 className="card-title">{title}</h3>
@@ -100,50 +100,59 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
       {/* Filter and Search Bar */}
       <div className="filter-bar">
         <div className="filter-left">
-          <input
-            type="text"
-            className="filter-input"
-            placeholder="Search invoice or GSTIN..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setCurrentPage(1);
-            }}
-          />
+          <div className="search-input-wrapper">
+            <Search size={14} color="#94a3b8" />
+            <input
+              type="text"
+              className="filter-input-with-icon"
+              placeholder="Search invoice or GSTIN..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+          </div>
 
-          <select
-            className="filter-select"
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-          >
-            <option value="ALL">All Statuses</option>
-            <option value="MATCH">Matched</option>
-            <option value="MISMATCH">Mismatched</option>
-            <option value="MISSING">Missing in GST</option>
-            <option value="EXTRA">Extra in GST</option>
-          </select>
+          <div className="filter-dropdown-wrapper">
+            <Filter size={13} color="#94a3b8" />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="MATCH">MATCH Only</option>
+              <option value="MISMATCH">MISMATCH Only</option>
+              <option value="MISSING">MISSING IN GST Only</option>
+              <option value="EXTRA">EXTRA IN GST Only</option>
+            </select>
+          </div>
 
-          <select
-            className="filter-select"
-            value={gstinFilter}
-            onChange={(e) => {
-              setGstinFilter(e.target.value);
-              setCurrentPage(1);
-            }}
-          >
-            <option value="ALL">All GSTINs</option>
-            {uniqueGstins.map((gstin) => (
-              <option key={gstin} value={gstin}>
-                {gstin}
-              </option>
-            ))}
-          </select>
+          {uniqueGstins.length > 0 && (
+            <select
+              className="filter-select"
+              value={gstinFilter}
+              onChange={(e) => {
+                setGstinFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="ALL">All Counterparties</option>
+              {uniqueGstins.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          )}
 
           {(search || statusFilter !== "ALL" || gstinFilter !== "ALL") && (
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => {
                 setSearch("");
@@ -152,68 +161,76 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
                 setCurrentPage(1);
               }}
             >
-              Reset Filters
+              Clear Filters
             </button>
           )}
         </div>
       </div>
 
-      {/* Table Content */}
+      {/* Data Table */}
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
             <tr>
               <th onClick={() => handleSort("invoice_no")} style={{ cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  Invoice No <ArrowUpDown size={12} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Invoice No</span>
+                  <ArrowUpDown size={12} color="#94a3b8" />
                 </div>
               </th>
               <th onClick={() => handleSort("invoice_date")} style={{ cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  Date <ArrowUpDown size={12} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Date</span>
+                  <ArrowUpDown size={12} color="#94a3b8" />
                 </div>
               </th>
-              <th>GSTIN</th>
-              <th onClick={() => handleSort("taxable_value")} style={{ cursor: "pointer", textAlign: "right" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                  Taxable Value <ArrowUpDown size={12} />
+              <th>Counterparty GSTIN</th>
+              <th onClick={() => handleSort("taxable_value")} style={{ textAlign: "right", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                  <span>Taxable Value</span>
+                  <ArrowUpDown size={12} color="#94a3b8" />
                 </div>
               </th>
-              <th onClick={() => handleSort("gst_amount")} style={{ cursor: "pointer", textAlign: "right" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                  GST Amount <ArrowUpDown size={12} />
+              <th onClick={() => handleSort("gst_amount")} style={{ textAlign: "right", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                  <span>GST Amount</span>
+                  <ArrowUpDown size={12} color="#94a3b8" />
                 </div>
               </th>
               <th>Status</th>
               <th style={{ textAlign: "right" }}>Difference</th>
-              <th style={{ textAlign: "center" }}>Action</th>
+              <th style={{ textAlign: "center" }}>Inspect</th>
             </tr>
           </thead>
           <tbody>
             {paginatedRecords.length === 0 ? (
               <tr>
                 <td colSpan={8} className="empty-state">
-                  No records match your filter criteria.
+                  No records match the current search and filter criteria.
                 </td>
               </tr>
             ) : (
-              paginatedRecords.map((row) => {
+              paginatedRecords.map((row, idx) => {
                 const diff = row.taxable_value_diff ?? row.gst_amount_diff;
                 const hasDiff = diff !== null && diff !== undefined && diff !== 0;
 
                 return (
-                  <tr key={row.invoice_no}>
+                  <tr
+                    key={`${row.invoice_no || "inv"}-${row.status || ""}-${row.gstin || ""}-${idx}`}
+                    onClick={() => onSelectInvoice && onSelectInvoice(row)}
+                    style={{ cursor: onSelectInvoice ? "pointer" : "default" }}
+                  >
                     <td className="mono-cell" style={{ fontWeight: 600 }}>
                       {row.invoice_no}
                     </td>
                     <td>{row.invoice_date || "—"}</td>
-                    <td className="mono-cell" style={{ color: "var(--slate-600)" }}>
-                      {row.gstin || "—"}
+                    <td className="mono-cell">
+                      <span className="gstin-tag">{row.gstin || "—"}</span>
                     </td>
-                    <td style={{ textAlign: "right", fontWeight: 500 }}>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>
                       {formatCurrency(row.taxable_value)}
                     </td>
-                    <td style={{ textAlign: "right", fontWeight: 500 }}>
+                    <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>
                       {formatCurrency(row.gst_amount)}
                     </td>
                     <td>
@@ -223,20 +240,23 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
                       style={{
                         textAlign: "right",
                         fontFamily: "var(--font-mono)",
-                        color: hasDiff ? "#e11d48" : "var(--slate-500)",
                         fontWeight: hasDiff ? 700 : 400,
+                        color: hasDiff ? "#dc2626" : "var(--text-muted)",
                       }}
                     >
-                      {hasDiff ? formatCurrency(diff) : "₹0.00"}
+                      {hasDiff ? formatCurrency(diff) : "—"}
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <button
+                        type="button"
                         className="btn btn-secondary btn-sm"
-                        title="Inspect reconciliation details"
-                        onClick={() => onSelectInvoice(row)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectInvoice) onSelectInvoice(row);
+                        }}
                       >
                         <Eye size={13} />
-                        <span>Inspect</span>
+                        <span>View</span>
                       </button>
                     </td>
                   </tr>
@@ -249,12 +269,13 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
 
       {/* Pagination Controls */}
       {totalPages > 1 && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Page {currentPage} of {totalPages}
+        <div className="pagination-bar">
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> ({sortedRecords.length} records)
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
               disabled={currentPage === 1}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -262,6 +283,7 @@ export function ReconciliationTable({ records = [], onSelectInvoice, title, subt
               <ChevronLeft size={14} /> Previous
             </button>
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
               disabled={currentPage === totalPages}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}

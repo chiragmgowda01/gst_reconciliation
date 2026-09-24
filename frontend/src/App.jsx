@@ -6,6 +6,7 @@ import { TopBar } from "./components/TopBar";
 import { InvoiceDetailModal } from "./components/InvoiceDetailModal";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ErrorState } from "./components/ErrorState";
+import { Footer } from "./components/Footer";
 
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -151,8 +152,16 @@ export function App() {
   };
 
   const handleSelectBusiness = (biz) => {
-    setActiveBusiness(biz);
+    if (!biz) return;
+    if (activeBusiness && String(biz.id) === String(activeBusiness.id)) return;
+    // Clear stale data immediately so records from previous business are never shown
+    setReconciliationData(null);
+    setGstr3b(null);
+    setAnomalies([]);
+    setLoading(true);
+    setError("");
     authStorage.setActiveBusinessId(biz.id);
+    setActiveBusiness(biz);
   };
 
   const handleBusinessAdded = (newBiz) => {
@@ -204,7 +213,9 @@ export function App() {
 
         <main className="page-content">
           {loading ? (
-            <LoadingSkeleton />
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <LoadingSkeleton />
+            </div>
           ) : error ? (
             <ErrorState error={error} onRetry={() => loadDashboardData(false)} />
           ) : (
@@ -216,6 +227,7 @@ export function App() {
                   anomalies={anomalies}
                   onSelectInvoice={setSelectedInvoice}
                   onNavigate={setCurrentTab}
+                  activeBusiness={activeBusiness}
                 />
               )}
 
@@ -249,26 +261,36 @@ export function App() {
 
               {currentTab === "invoices" && (
                 <InvoicesPage
+                  key={activeBusiness?.id}
                   onSelectInvoice={setSelectedInvoice}
                 />
               )}
 
               {currentTab === "upload" && (
                 <UploadPage
+                  key={activeBusiness?.id}
                   onUploadSuccess={() => loadDashboardData(true)}
                 />
               )}
 
               {currentTab === "reports" && (
-                <ReportsPage />
+                <ReportsPage
+                  key={activeBusiness?.id}
+                />
               )}
 
               {currentTab === "settings" && (
-                <SettingsPage />
+                <SettingsPage
+                  key={activeBusiness?.id}
+                  activeBusiness={activeBusiness}
+                />
               )}
             </>
           )}
         </main>
+
+        {/* Structured Institutional Footer */}
+        <Footer onNavigate={setCurrentTab} />
       </div>
 
       {/* Side-by-side Inspection Modal */}

@@ -15,18 +15,48 @@ export function TopBar({
   onLogout,
 }) {
   const titles = {
-    dashboard: { title: "Executive Dashboard", subtitle: "Comprehensive reconciliation health and tax overview" },
-    sales: { title: "Sales Reconciliation", subtitle: "Sales Register ↔ GSTR-1 outward supplies matching" },
-    purchase: { title: "Purchase Reconciliation", subtitle: "Purchase Register ↔ GSTR-2A eligible ITC verification" },
-    gstr3b: { title: "GSTR-3B Summary", subtitle: "Monthly tax liability and Input Tax Credit reconciliation" },
-    anomalies: { title: "Anomaly & Exception Center", subtitle: "Automated discrepancy detection and compliance risks" },
-    invoices: { title: "Invoices Master Database", subtitle: "Centralized multi-source invoice registry" },
-    upload: { title: "CSV Data Ingestion", subtitle: "Upload and validate sales, purchase, GSTR-1 and GSTR-2A files" },
-    reports: { title: "Reports & Export Center", subtitle: "Download audit summaries and reconciliation schedules" },
-    settings: { title: "System Settings", subtitle: "Reconciliation thresholds and business configuration" },
+    dashboard: {
+      title: "Executive Dashboard",
+      subtitle: "GST reconciliation overview & compliance health",
+    },
+    sales: {
+      title: "Sales Reconciliation",
+      subtitle: "Sales Register ↔ GSTR-1 outward matching",
+    },
+    purchase: {
+      title: "Purchase & ITC Reconciliation",
+      subtitle: "Purchase Register ↔ GSTR-2A supplier filings",
+    },
+    gstr3b: {
+      title: "Form GSTR-3B Summary",
+      subtitle: "Monthly tax liability and Input Tax Credit",
+    },
+    anomalies: {
+      title: "Anomaly Center",
+      subtitle: "Audit exception tracking and discrepancy reviews",
+    },
+    invoices: {
+      title: "Invoice Master",
+      subtitle: "Multi-source invoice database records",
+    },
+    upload: {
+      title: "CSV Ingestion",
+      subtitle: "Upload and validate register CSV files",
+    },
+    reports: {
+      title: "Statutory Reports",
+      subtitle: "Download reconciliation schedules and audit CSVs",
+    },
+    settings: {
+      title: "Configuration",
+      subtitle: "System parameters and tenant settings",
+    },
   };
 
-  const current = titles[currentTab] || { title: "GST Reconciliation", subtitle: "Automated MSME GST Suite" };
+  const current = titles[currentTab] || {
+    title: "ReconcilePro",
+    subtitle: "MSME GST Reconciliation Platform",
+  };
 
   return (
     <header className="topbar">
@@ -56,29 +86,31 @@ export function TopBar({
         </div>
 
         <button
+          type="button"
           className="topbar-btn"
           title="Refresh Data"
           onClick={onRefresh}
           disabled={isRefreshing}
         >
-          <RotateCw size={16} className={isRefreshing ? "animate-spin" : ""} />
+          <RotateCw size={15} className={isRefreshing ? "animate-spin" : ""} />
         </button>
 
         <button
+          type="button"
           className="topbar-btn"
-          title="Notifications & Anomalies"
+          title="Anomalies & Notifications"
           onClick={onOpenNotifications}
         >
-          <Bell size={16} />
+          <Bell size={15} />
           <span className="notif-dot" />
         </button>
 
         {onLogout && (
           <button
-            className="topbar-btn"
+            type="button"
+            className="topbar-btn btn-signout"
             title="Sign Out"
             onClick={onLogout}
-            style={{ color: "#ef4444" }}
           >
             <LogOut size={15} />
           </button>

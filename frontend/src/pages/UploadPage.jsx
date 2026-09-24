@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UploadCloud, AlertCircle, FileCheck } from "lucide-react";
+import { UploadCloud, AlertCircle, FileCheck, FileText, ArrowRight, ShieldCheck } from "lucide-react";
 import { api } from "../api/client";
 
 export function UploadPage({ onUploadSuccess }) {
@@ -8,12 +8,61 @@ export function UploadPage({ onUploadSuccess }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const targets = [
+    {
+      id: "sales_register",
+      title: "Sales Register",
+      code: "Outward Supplies",
+      desc: "Internal sales invoices recorded in company accounting books",
+    },
+    {
+      id: "gstr1",
+      title: "Form GSTR-1",
+      code: "Portal Filed",
+      desc: "Outward supplies reported on the GST Common Portal",
+    },
+    {
+      id: "purchase_register",
+      title: "Purchase Register",
+      code: "Inward Supplies",
+      desc: "Vendor bills and expense invoices recorded internally",
+    },
+    {
+      id: "gstr2a",
+      title: "Form GSTR-2A",
+      code: "Auto-Drafted ITC",
+      desc: "Counterparty supplier filings reflecting in portal ITC register",
+    },
+    {
+      id: "gstr3b",
+      title: "Form GSTR-3B",
+      code: "Summary Return",
+      desc: "Self-assessed monthly return summary of tax liability & ITC",
+    },
+  ];
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
       setResult(null);
       setError("");
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.name.endsWith(".csv")) {
+        setSelectedFile(file);
+        setResult(null);
+        setError("");
+      } else {
+        setError("Only standard comma-separated CSV files are supported.");
+      }
     }
   };
 
@@ -40,157 +89,157 @@ export function UploadPage({ onUploadSuccess }) {
   };
 
   return (
-    <div className="animate-fade-in" style={{ maxWidth: 850, margin: "0 auto" }}>
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">CSV Data Ingestion & Statutory Validator</h3>
-            <p className="card-subtitle">
-              Upload company registers or portal return CSVs for structural verification and database ingestion
-            </p>
-          </div>
+    <div className="animate-fade-in" style={{ maxWidth: 960, margin: "0 auto" }}>
+      {/* 1. Page Header */}
+      <div className="section-header" style={{ marginBottom: 20 }}>
+        <div>
+          <h2 className="section-title">CSV Ledger Ingestion & Validation</h2>
+          <p className="section-subtitle">
+            Upload internal registers and portal return exports to synchronize your PostgreSQL database
+          </p>
         </div>
+        <div className="section-badge">
+          <ShieldCheck size={13} />
+          <span>PostgreSQL Active Tenant Storage</span>
+        </div>
+      </div>
 
+      {/* 2. Main Upload Card */}
+      <div className="institutional-card">
         <form onSubmit={handleUpload}>
-          {/* Target Register Selection */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-main)", marginBottom: 8 }}>
-              Select Data Target / Register Type:
+          {/* Target Register Cards Selector */}
+          <div style={{ marginBottom: 24 }}>
+            <label className="form-label-heading">
+              1. Select Data Target / Register Type
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              {[
-                { id: "sales_register", label: "Sales Register (Outward)" },
-                { id: "gstr1", label: "GSTR-1 (Portal Return)" },
-                { id: "purchase_register", label: "Purchase Register (Inward)" },
-                { id: "gstr2a", label: "GSTR-2A (Auto-Drafted ITC)" },
-              ].map((opt) => (
+            <div className="target-registers-grid">
+              {targets.map((tgt) => (
                 <div
-                  key={opt.id}
-                  onClick={() => setSourceType(opt.id)}
-                  style={{
-                    border: `1.5px solid ${sourceType === opt.id ? "var(--primary-600)" : "var(--border-color)"}`,
-                    backgroundColor: sourceType === opt.id ? "var(--primary-50)" : "#fff",
-                    borderRadius: "var(--radius-sm)",
-                    padding: "12px",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    fontWeight: sourceType === opt.id ? 700 : 500,
-                    fontSize: 12.5,
-                    color: sourceType === opt.id ? "var(--primary-700)" : "var(--text-main)",
-                    transition: "all 0.15s ease",
+                  key={tgt.id}
+                  className={`target-register-card ${sourceType === tgt.id ? "active" : ""}`}
+                  onClick={() => {
+                    setSourceType(tgt.id);
+                    setResult(null);
+                    setError("");
                   }}
                 >
-                  {opt.label}
+                  <div className="target-card-header">
+                    <span className="target-code">{tgt.code}</span>
+                    <span className="target-radio-dot"></span>
+                  </div>
+                  <h4 className="target-title">{tgt.title}</h4>
+                  <p className="target-desc">{tgt.desc}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Upload Drop Zone */}
-          <div
-            className="upload-card"
-            onClick={() => document.getElementById("csv-file-input").click()}
-          >
-            <input
-              id="csv-file-input"
-              type="file"
-              accept=".csv"
-              style={{ display: "none" }}
-              onChange={handleFileChange}
-            />
+          {/* Drag & Drop File Zone */}
+          <div style={{ marginBottom: 20 }}>
+            <label className="form-label-heading">
+              2. Select or Drag & Drop File
+            </label>
+            <div
+              className={`upload-dropzone ${isDragOver ? "drag-over" : ""} ${selectedFile ? "has-file" : ""}`}
+              onClick={() => document.getElementById("csv-file-input").click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={handleDrop}
+            >
+              <input
+                id="csv-file-input"
+                type="file"
+                accept=".csv"
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
 
-            <UploadCloud size={40} color="#3b82f6" style={{ margin: "0 auto 12px" }} />
+              <div className="dropzone-icon-wrap">
+                <UploadCloud size={32} color="#ea580c" />
+              </div>
 
-            {selectedFile ? (
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--slate-800)" }}>
-                  {selectedFile.name}
+              {selectedFile ? (
+                <div className="dropzone-file-info">
+                  <div className="dropzone-filename">
+                    <FileText size={16} />
+                    <span>{selectedFile.name}</span>
+                  </div>
+                  <div className="dropzone-filesize">
+                    {(selectedFile.size / 1024).toFixed(1)} KB • Ready for validation
+                  </div>
+                  <div className="dropzone-click-hint">Click or drag a new file to replace</div>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                  {(selectedFile.size / 1024).toFixed(1)} KB — Click to change file
+              ) : (
+                <div className="dropzone-placeholder">
+                  <h4>Click to browse or drag and drop your CSV file</h4>
+                  <p>Accepts UTF-8 encoded CSV files. Standard headers: invoice_no, invoice_date, customer/supplier_gstin, taxable_value, gst_amount</p>
                 </div>
-              </div>
-            ) : (
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--slate-800)" }}>
-                  Click to select CSV file or drag and drop
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                  Accepts standard CSV with headers: invoice_no, invoice_date, customer/supplier_gstin, taxable_value, gst_amount
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {error && (
-            <div
-              style={{
-                marginTop: 16,
-                padding: "12px 14px",
-                backgroundColor: "var(--mismatch-bg)",
-                border: "1px solid var(--mismatch-border)",
-                borderRadius: "var(--radius-sm)",
-                color: "var(--mismatch-text)",
-                fontSize: 13,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
+            <div className="upload-error-banner">
               <AlertCircle size={16} />
               <span>{error}</span>
             </div>
           )}
 
-          <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
+          <div className="upload-actions-bar">
             <button
               type="submit"
               className="btn btn-primary"
               disabled={!selectedFile || uploading}
-              style={{ minWidth: 160, justifyContent: "center" }}
+              style={{ minWidth: 180, justifyContent: "center" }}
             >
-              {uploading ? "Validating & Ingesting..." : "Validate & Upload"}
+              {uploading ? (
+                <span>Validating & Ingesting...</span>
+              ) : (
+                <>
+                  <span>Validate & Upload to DB</span>
+                  <ArrowRight size={14} />
+                </>
+              )}
             </button>
           </div>
         </form>
 
         {/* Validation & Ingestion Results */}
         {result && (
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border-color)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <div className="upload-results-panel">
+            <div className="results-header">
               <FileCheck size={20} color="#059669" />
-              <h4 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-main)" }}>
-                Validation & Ingestion Summary
-              </h4>
+              <h4>Validation & Ingestion Report</h4>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
-              <div style={{ padding: 14, background: "var(--slate-50)", border: "1px solid var(--border-color)", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Total Records</div>
-                <div style={{ fontSize: 20, fontWeight: 800 }}>{result.total_records}</div>
+            <div className="results-grid">
+              <div className="result-kpi-box">
+                <div className="res-label">Total Records Evaluated</div>
+                <div className="res-value">{result.total_records}</div>
               </div>
-              <div style={{ padding: 14, background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "#059669" }}>Imported to DB</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#059669" }}>{result.imported}</div>
+              <div className="result-kpi-box box-success">
+                <div className="res-label">Imported to Database</div>
+                <div className="res-value text-green">{result.imported}</div>
               </div>
-              <div style={{ padding: 14, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "#d97706" }}>Duplicate Skipped</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#d97706" }}>{result.duplicates}</div>
+              <div className="result-kpi-box box-warning">
+                <div className="res-label">Duplicate Records Skipped</div>
+                <div className="res-value text-amber">{result.duplicates}</div>
               </div>
-              <div style={{ padding: 14, background: "#fff1f2", border: "1px solid #fecdd3", borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: "#e11d48" }}>Invalid Records</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#e11d48" }}>{result.invalid_records}</div>
+              <div className="result-kpi-box box-error">
+                <div className="res-label">Invalid Format / Schema</div>
+                <div className="res-value text-red">{result.invalid_records}</div>
               </div>
             </div>
 
             {result.errors && result.errors.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <h5 style={{ fontSize: 12.5, fontWeight: 700, color: "#e11d48", marginBottom: 8 }}>
-                  Validation Errors Flagged:
-                </h5>
-                <div style={{ maxHeight: 180, overflowY: "auto", background: "var(--slate-50)", border: "1px solid var(--border-color)", borderRadius: 6, padding: "8px 12px" }}>
+              <div className="results-errors-list">
+                <h5>Validation Discrepancies Flagged:</h5>
+                <div className="errors-scroll-container">
                   {result.errors.map((err, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#991b1b", padding: "4px 0", borderBottom: i < result.errors.length - 1 ? "1px solid #e2e8f0" : "none" }}>
+                    <div key={i} className="error-item">
                       • {err}
                     </div>
                   ))}

@@ -1,11 +1,19 @@
-export function KPICard({ title, value, icon: Icon, subtext, iconBg = "#eff6ff", iconColor = "#2563eb" }) {
+export function KPICard({
+  title,
+  value,
+  icon: Icon,
+  subtext,
+  iconBg = "#fff7ed",
+  iconColor = "#ea580c",
+  accentColor,
+}) {
   return (
-    <div className="kpi-card">
+    <div className="kpi-card" style={accentColor ? { borderTop: `3px solid ${accentColor}` } : {}}>
       <div className="kpi-header">
         <span className="kpi-title">{title}</span>
         {Icon && (
           <div className="kpi-icon-wrap" style={{ backgroundColor: iconBg, color: iconColor }}>
-            <Icon size={18} />
+            <Icon size={17} />
           </div>
         )}
       </div>

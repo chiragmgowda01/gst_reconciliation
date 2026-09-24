@@ -103,3 +103,74 @@ def test_sales_and_purchase_file_reconciliation():
     assert "MISMATCH" in p_statuses
     assert "MISSING_IN_GST" in p_statuses
     assert "EXTRA_IN_GST" in p_statuses
+
+
+def test_reconciliation_duplicates_preserved():
+    # Test duplicate invoice numbers in internal records
+    my_data = pd.DataFrame([
+        {
+            "invoice_no": "INV-DUP-1",
+            "invoice_date": "2026-07-01",
+            "gstin": "29AAAAA1111A1Z5",
+            "taxable_value": 10000.0,
+            "gst_amount": 1800.0,
+        },
+        {
+            "invoice_no": "INV-DUP-1",
+            "invoice_date": "2026-07-01",
+            "gstin": "29AAAAA1111A1Z5",
+            "taxable_value": 10000.0,
+            "gst_amount": 1800.0,
+        },
+    ])
+    gst_data = pd.DataFrame([
+        {
+            "invoice_no": "INV-DUP-1",
+            "invoice_date": "2026-07-01",
+            "gstin": "29AAAAA1111A1Z5",
+            "taxable_value": 10000.0,
+            "gst_amount": 1800.0,
+        },
+    ])
+
+    res = reconcile(my_data, gst_data)
+    # Both duplicate rows must be preserved, none silently dropped by .iloc[0]
+    assert len(res) == 2
+    for _, row in res.iterrows():
+        assert row["status"] == "MISMATCH"
+        assert "Duplicate invoice number" in row["explanation"]
+
+
+def test_reconciliation_duplicates_in_unilateral_sources():
+    # Duplicate invoices only in my_data
+    my_data = pd.DataFrame([
+        {
+            "invoice_no": "INV-DUP-MY",
+            "invoice_date": "2026-07-01",
+            "gstin": "29AAAAA1111A1Z5",
+            "taxable_value": 5000.0,
+            "gst_amount": 900.0,
+        },
+        {
+            "invoice_no": "INV-DUP-MY",
+            "invoice_date": "2026-07-01",
+            "gstin": "29AAAAA1111A1Z5",
+            "taxable_value": 5000.0,
+            "gst_amount": 900.0,
+        },
+    ])
+    gst_data = pd.DataFrame([], columns=["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount"])
+
+    res = reconcile(my_data, gst_data)
+    assert len(res) == 2
+    for _, row in res.iterrows():
+        assert row["status"] == "MISSING_IN_GST"
+        assert "Duplicate invoice" in row["explanation"]
+
+
+def test_reconciliation_empty_dfs():
+    empty_a = pd.DataFrame([], columns=["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount"])
+    empty_b = pd.DataFrame([], columns=["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount"])
+    res = reconcile(empty_a, empty_b)
+    assert len(res) == 0
+

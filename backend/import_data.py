@@ -31,7 +31,7 @@ def ensure_business(session, gstin: str, business_name: str | None = None) -> Bu
     return business
 
 
-def import_csv_file(file_name: str, source: str) -> int:
+def import_csv_file(file_name: str, source: str, business_id: int | None = None) -> int:
     session = SessionLocal()
     try:
         file_path = DATA / file_name
@@ -40,25 +40,32 @@ def import_csv_file(file_name: str, source: str) -> int:
         if df.empty:
             return 0
 
+        # Demo MSME defaults to Business 1 or ensure default MSME business
+        if business_id is None:
+            demo_msme = session.scalar(select(Business).where(Business.id == 1))
+            if demo_msme is None:
+                demo_msme = ensure_business(session, "29AAAAA1111A1Z5", "Demo MSME Enterprise")
+            target_business_id = demo_msme.id
+        else:
+            target_business_id = business_id
+
         imported = 0
         for _, row in df.iterrows():
             invoice_no = str(row["invoice_no"]).strip()
             invoice_date = pd.to_datetime(row["invoice_date"]).date()
-            gstin = str(row.get("customer_gstin") or row.get("supplier_gstin") or "").strip()
+            gstin = str(row.get("customer_gstin") or row.get("supplier_gstin") or row.get("gstin") or "").strip()
             taxable_value = float(row["taxable_value"])
             gst_amount = float(row["gst_amount"])
 
             existing = session.scalar(
                 select(Invoice).where(
                     Invoice.invoice_no == invoice_no,
-                    Invoice.gstin == gstin,
+                    Invoice.business_id == target_business_id,
                     Invoice.source == source,
                 )
             )
             if existing is not None:
                 continue
-
-            business = ensure_business(session, gstin)
 
             invoice = Invoice(
                 invoice_no=invoice_no,
@@ -67,7 +74,7 @@ def import_csv_file(file_name: str, source: str) -> int:
                 taxable_value=taxable_value,
                 gst_amount=gst_amount,
                 source=source,
-                business_id=business.id,
+                business_id=target_business_id,
             )
             session.add(invoice)
             imported += 1
