@@ -1,6 +1,10 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from database import get_db
 from models.models import Business
+from routers.reports import get_business_reconciled_dfs
 from services.anomaly_service import get_all_anomalies
 from services.auth import get_current_business
 
@@ -13,12 +17,12 @@ def list_anomalies(
     type: Optional[str] = Query(None, description="Filter by anomaly type"),
     search: Optional[str] = Query(None, description="Search by invoice number or GSTIN"),
     current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db),
 ):
-    if current_business.id == 1:
-        all_anomalies = get_all_anomalies()
-    else:
-        # Scoped to business
-        all_anomalies = [a for a in get_all_anomalies() if a.get("gstin") == current_business.gstin]
+    sales_df, purchase_df = get_business_reconciled_dfs(current_business, db)
+    all_anomalies = get_all_anomalies(sales_df=sales_df, purchase_df=purchase_df)
+    if current_business.id != 1:
+        all_anomalies = [a for a in all_anomalies if a.get("gstin") == current_business.gstin]
 
     filtered = all_anomalies
     if severity:

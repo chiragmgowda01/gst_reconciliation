@@ -2,7 +2,11 @@ import io
 from typing import Optional
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from models.models import Business
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models.models import Business, Invoice
 from reconciliation.reconcile import reconcile
 from services.anomaly_service import get_all_anomalies
 from services.auth import get_current_business
@@ -10,8 +14,39 @@ from services.auth import get_current_business
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
-@router.get("/summary")
-def get_reports_summary(current_business: Business = Depends(get_current_business)):
+def get_business_reconciled_dfs(current_business: Business, db: Session):
+    try:
+        invoices = db.scalars(select(Invoice).where(Invoice.business_id == current_business.id)).all()
+    except Exception:
+        invoices = []
+
+    if invoices:
+        sales_reg, gstr1_reg, purchase_reg, gstr2a_reg = [], [], [], []
+        for inv in invoices:
+            item = {
+                "invoice_no": inv.invoice_no,
+                "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else "",
+                "gstin": inv.gstin,
+                "taxable_value": inv.taxable_value,
+                "gst_amount": inv.gst_amount,
+            }
+            if inv.source == "sales_register":
+                sales_reg.append(item)
+            elif inv.source == "gstr1":
+                gstr1_reg.append(item)
+            elif inv.source == "purchase_register":
+                purchase_reg.append(item)
+            elif inv.source == "gstr2a":
+                gstr2a_reg.append(item)
+
+        cols = ["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount"]
+        sales_df = reconcile(pd.DataFrame(sales_reg) if sales_reg else pd.DataFrame(columns=cols),
+                             pd.DataFrame(gstr1_reg) if gstr1_reg else pd.DataFrame(columns=cols))
+        purchase_df = reconcile(pd.DataFrame(purchase_reg) if purchase_reg else pd.DataFrame(columns=cols),
+                                pd.DataFrame(gstr2a_reg) if gstr2a_reg else pd.DataFrame(columns=cols))
+        return sales_df, purchase_df
+
+    # Fallback to CSV files
     sales_df = reconcile("sales_register.csv", "gstr1.csv")
     purchase_df = reconcile("purchase_register.csv", "gstr2a.csv")
 
@@ -21,7 +56,19 @@ def get_reports_summary(current_business: Business = Depends(get_current_busines
         sales_df = s_matches if not s_matches.empty else sales_df
         purchase_df = p_matches if not p_matches.empty else purchase_df
 
-    anomalies = [a for a in get_all_anomalies() if current_business.id == 1 or a.get("gstin") == current_business.gstin]
+    return sales_df, purchase_df
+
+
+@router.get("/summary")
+def get_reports_summary(
+    current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db),
+):
+    sales_df, purchase_df = get_business_reconciled_dfs(current_business, db)
+    anomalies = [
+        a for a in get_all_anomalies(sales_df=sales_df, purchase_df=purchase_df)
+        if current_business.id == 1 or a.get("gstin") == current_business.gstin
+    ]
 
     def calc_stats(df: pd.DataFrame):
         total = len(df)
@@ -71,9 +118,9 @@ def get_reports_summary(current_business: Business = Depends(get_current_busines
 def export_report_csv(
     report_type: str = Query("sales", description="sales, purchases, mismatches, missing, anomalies"),
     current_business: Business = Depends(get_current_business),
+    db: Session = Depends(get_db),
 ):
-    sales_df = reconcile("sales_register.csv", "gstr1.csv")
-    purchase_df = reconcile("purchase_register.csv", "gstr2a.csv")
+    sales_df, purchase_df = get_business_reconciled_dfs(current_business, db)
 
     output = io.StringIO()
     filename = f"gst_{report_type}_report.csv"
@@ -95,7 +142,7 @@ def export_report_csv(
         ])
         combined.to_csv(output, index=False)
     elif report_type == "anomalies":
-        anomalies = get_all_anomalies()
+        anomalies = get_all_anomalies(sales_df=sales_df, purchase_df=purchase_df)
         df = pd.DataFrame(anomalies)
         df.to_csv(output, index=False)
     else:

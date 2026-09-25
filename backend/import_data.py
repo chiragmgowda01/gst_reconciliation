@@ -76,6 +76,7 @@ def import_csv_file(file_name: str, source: str, business_id: int | None = None)
                 source=source,
                 business_id=target_business_id,
             )
+            
             session.add(invoice)
             imported += 1
 

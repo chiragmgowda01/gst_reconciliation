@@ -3,8 +3,9 @@ from reconciliation.reconcile import reconcile
 from services.validation import validate_gstin
 
 
-def get_all_anomalies(sales_file: str = "sales_register.csv", gstr1_file: str = "gstr1.csv",
-                      purchase_file: str = "purchase_register.csv", gstr2a_file: str = "gstr2a.csv") -> List[Dict[str, Any]]:
+def get_all_anomalies(sales_file: Any = "sales_register.csv", gstr1_file: Any = "gstr1.csv",
+                      purchase_file: Any = "purchase_register.csv", gstr2a_file: Any = "gstr2a.csv",
+                      sales_df: Optional[Any] = None, purchase_df: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Deterministically computes anomalies across sales and purchase reconciliation datasets.
     Rules are transparent and documented:
@@ -19,7 +20,8 @@ def get_all_anomalies(sales_file: str = "sales_register.csv", gstr1_file: str = 
     seen_invoices = set()
 
     # Reconcile Sales (Sales Register vs GSTR-1)
-    sales_df = reconcile(sales_file, gstr1_file)
+    if sales_df is None:
+        sales_df = reconcile(sales_file, gstr1_file)
     for _, row in sales_df.iterrows():
         inv_no = str(row["invoice_no"])
         status = row["status"]
@@ -104,7 +106,8 @@ def get_all_anomalies(sales_file: str = "sales_register.csv", gstr1_file: str = 
             })
 
     # Reconcile Purchases (Purchase Register vs GSTR-2A)
-    purchase_df = reconcile(purchase_file, gstr2a_file)
+    if purchase_df is None:
+        purchase_df = reconcile(purchase_file, gstr2a_file)
     for _, row in purchase_df.iterrows():
         inv_no = str(row["invoice_no"])
         status = row["status"]

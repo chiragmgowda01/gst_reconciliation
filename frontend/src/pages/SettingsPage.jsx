@@ -1,5 +1,4 @@
-import { Building2, Database, Sliders, CheckCircle2, ShieldCheck } from "lucide-react";
-import { api } from "../api/client";
+import { Building2, Sliders, CheckCircle2, ShieldCheck } from "lucide-react";
 
 const GST_STATES = {
   "01": "Jammu & Kashmir",
@@ -37,7 +36,7 @@ export function SettingsPage({ activeBusiness }) {
           System Configuration & Profile
         </h2>
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>
-          MSME legal entity settings, database integration parameters, and statutory reconciliation tolerances
+          MSME legal entity settings and statutory reconciliation tolerances
         </p>
       </div>
 
@@ -160,111 +159,6 @@ export function SettingsPage({ activeBusiness }) {
               }}
             >
               Regular MSME Taxpayer (Monthly GSTR-1 / GSTR-3B)
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Backend Architecture & Database Integration */}
-      <div
-        className="institutional-card"
-        style={{
-          background: "#ffffff",
-          border: "1px solid #e7e2dc",
-          borderRadius: 18,
-          boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
-          padding: "26px 28px",
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, paddingBottom: 14, borderBottom: "1px solid #f1f5f9" }}>
-          <div
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              backgroundColor: "rgba(5, 150, 105, 0.12)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#059669",
-            }}
-          >
-            <Database size={20} />
-          </div>
-          <div>
-            <h3 style={{ fontSize: 15.5, fontWeight: 700, color: "#0f172a" }}>Backend Architecture & Database Integration</h3>
-            <p style={{ fontSize: 12, color: "#64748b" }}>FastAPI REST services and cloud PostgreSQL persistence</p>
-          </div>
-        </div>
-
-        <div className="config-grid">
-          <div>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
-              API Base URL
-            </label>
-            <div
-              style={{
-                height: 48,
-                borderRadius: 10,
-                backgroundColor: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                padding: "0 14px",
-                display: "flex",
-                alignItems: "center",
-                fontSize: 13,
-                fontFamily: "var(--font-mono)",
-                color: "#334155",
-              }}
-            >
-              {api.baseUrl}
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
-              Database Provider
-            </label>
-            <div
-              style={{
-                height: 48,
-                borderRadius: 10,
-                backgroundColor: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                padding: "0 14px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                    display: "inline-block",
-                    boxShadow: "0 0 0 3px rgba(16, 185, 129, 0.2)",
-                  }}
-                />
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0f172a" }}>
-                  Supabase PostgreSQL
-                </span>
-              </div>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "#059669",
-                  backgroundColor: "#ecfdf5",
-                  padding: "3px 8px",
-                  borderRadius: 6,
-                  border: "1px solid #a7f3d0",
-                }}
-              >
-                Connected
-              </span>
             </div>
           </div>
         </div>

@@ -1,6 +1,21 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Ensure environment is loaded at startup from candidate locations
+env_candidates = [
+    Path(__file__).resolve().parent / ".env",
+    Path(__file__).resolve().parent.parent / ".env",
+    Path.cwd() / ".env",
+    Path.cwd() / "backend" / ".env",
+]
+for p in env_candidates:
+    if p.exists():
+        load_dotenv(p)
+        break
 
 from database import engine
 from models import models
@@ -21,25 +36,29 @@ app = FastAPI(
     description="Production-style GST reconciliation, exception management, and GSTR compliance system for MSMEs.",
 )
 
-# CORS configuration explicitly allowing Authorization and X-Business-ID
+# Robust CORS configuration compliant with credentials and custom headers
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+configured_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+allowed_origins = list(dict.fromkeys(configured_origins + default_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "*"
-    ],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=[
-        "Authorization",
-        "X-Business-ID",
-        "Content-Type",
-        "Accept",
-        "Origin",
-        "X-Requested-With",
-    ],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(auth_router)

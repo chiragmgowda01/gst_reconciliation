@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const rawApiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = rawApiUrl.replace(/\/+$/, "");
 
 const TOKEN_KEY = "gst_auth_token";
 const BIZ_KEY = "gst_active_biz_id";
@@ -25,7 +26,8 @@ export const authStorage = {
 };
 
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE}${endpoint}`;
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = `${API_BASE}${cleanEndpoint}`;
   const token = authStorage.getToken();
   const bizId = authStorage.getActiveBusinessId();
 
@@ -47,10 +49,10 @@ async function request(endpoint, options = {}) {
       headers,
     });
 
-    if (res.status === 401 && !endpoint.startsWith("/auth/login") && !endpoint.startsWith("/auth/register")) {
+    if (res.status === 401 && !cleanEndpoint.startsWith("/auth/login") && !cleanEndpoint.startsWith("/auth/register")) {
       authStorage.clear();
       window.dispatchEvent(new Event("auth:unauthorized"));
-      throw new Error("Session expired. Please sign in again.");
+      throw new Error("Your session has expired. Please sign in again.");
     }
 
     if (!res.ok) {
@@ -68,8 +70,13 @@ async function request(endpoint, options = {}) {
 
     return await res.json();
   } catch (err) {
-    if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error("Unable to connect to backend API. Please ensure FastAPI server is running on " + API_BASE, { cause: err });
+    if (
+      err.name === "TypeError" ||
+      (err.message && (err.message.toLowerCase().includes("fetch") || err.message.toLowerCase().includes("network")))
+    ) {
+      throw new Error(
+        `Unable to connect to the backend API server at ${API_BASE}. Please ensure the server is running and accessible.`
+      );
     }
     throw err;
   }

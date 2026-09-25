@@ -17,8 +17,8 @@ export function LoginPage({ onLoginSuccess }) {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError("Please enter your email and password.");
+    if (!email.trim() || !password) {
+      setError("Please enter both email address and password to sign in.");
       return;
     }
 
@@ -31,7 +31,7 @@ export function LoginPage({ onLoginSuccess }) {
         onLoginSuccess(res.user, res.businesses);
       }
     } catch (err) {
-      setError(err.message || "Invalid email or password. Please verify credentials.");
+      setError(err.message || "Invalid email or password. Please check your credentials and try again.");
     } finally {
       setLoading(false);
     }
@@ -176,10 +176,19 @@ export function LoginPage({ onLoginSuccess }) {
               </button>
 
               {/* Compact Demo Access Box */}
-              <div className="demo-access-box">
+              <div
+                className="demo-access-box"
+                style={{ cursor: "pointer" }}
+                title="Click to auto-fill demo credentials"
+                onClick={() => {
+                  setEmail("default@gst.local");
+                  setPassword("Demo@123");
+                  setError("");
+                }}
+              >
                 <div className="demo-header">
                   <Shield size={13} color="#ea580c" />
-                  <span>Demo Access</span>
+                  <span>Demo Access (Click to auto-fill)</span>
                 </div>
                 <div className="demo-credentials">
                   <div>Email: <strong>default@gst.local</strong></div>
