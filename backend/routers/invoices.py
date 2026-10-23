@@ -97,15 +97,15 @@ def get_invoice(
 @router.post("/upload")
 async def upload_csv(
     file: UploadFile = File(...),
-    source_type: str = Form(..., description="sales_register, gstr1, purchase_register, or gstr2a"),
+    source_type: str = Form(..., description="sales_register, gstr1, purchase_register, gstr2a, or gstr2b"),
     current_business: Business = Depends(get_current_business),
     db: Session = Depends(get_db),
 ):
-    valid_sources = {"sales_register", "gstr1", "purchase_register", "gstr2a"}
+    valid_sources = {"sales_register", "gstr1", "purchase_register", "gstr2a", "gstr2b"}
     if source_type not in valid_sources:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid source_type. Must be one of {list(valid_sources)}",
+            detail=f"Invalid source_type. Must be one of {sorted(list(valid_sources))}",
         )
 
     if not file.filename.endswith(".csv"):

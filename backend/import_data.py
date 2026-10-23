@@ -95,6 +95,7 @@ def import_all_gst_csv_data() -> dict[str, int]:
         "gstr1.csv": import_csv_file("gstr1.csv", "gstr1"),
         "purchase_register.csv": import_csv_file("purchase_register.csv", "purchase_register"),
         "gstr2a.csv": import_csv_file("gstr2a.csv", "gstr2a"),
+        "gstr2b.csv": import_csv_file("gstr2b.csv", "gstr2b"),
     }
     return results
 

@@ -32,8 +32,14 @@ export function UploadPage({ onUploadSuccess }) {
     {
       id: "gstr2a",
       title: "Form GSTR-2A",
-      code: "Auto-Drafted ITC",
-      desc: "Counterparty supplier filings reflecting in portal ITC register",
+      code: "Dynamic ITC",
+      desc: "Continuous counterparty supplier filings reflecting in portal ITC register",
+    },
+    {
+      id: "gstr2b",
+      title: "Form GSTR-2B",
+      code: "Static Auto-Drafted ITC",
+      desc: "Monthly static auto-drafted ITC statement for return filing under Rule 36(4)",
     },
     {
       id: "gstr3b",

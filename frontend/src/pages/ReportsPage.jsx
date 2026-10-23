@@ -7,10 +7,12 @@ import { LoadingSkeleton } from "../components/LoadingSkeleton";
 export function ReportsPage() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [purchaseSource, setPurchaseSource] = useState("gstr2a");
 
   useEffect(() => {
     let ignore = false;
-    api.getReportsSummary()
+    api.getReportsSummary({ purchase_source: purchaseSource })
       .then((data) => {
         if (!ignore) {
           setSummary(data);
@@ -24,66 +26,134 @@ export function ReportsPage() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [purchaseSource]);
 
   const handleExport = (type) => {
-    const url = api.getExportUrl(type);
+    const url = api.getExportUrl(type, purchaseSource);
     window.open(url, "_blank");
   };
 
   const reportsList = [
+    // ── Group 1: 6 Sales & GSTR-1 Outward Supply Reports ──
     {
       id: "sales",
+      group: "sales",
       title: "Sales Reconciliation Register Schedule",
       desc: "Complete matching matrix of internal Sales Register invoices against filed GSTR-1 returns with difference calculations.",
       badge: "Outward Supplies",
       frequency: "Monthly Tax Period",
     },
     {
-      id: "purchases",
-      title: "Purchase & ITC Eligibility Schedule",
-      desc: "Inward supply comparison between Purchase Register bills and auto-drafted GSTR-2A vendor portal filings.",
-      badge: "Inward ITC Verification",
-      frequency: "Monthly Tax Period",
+      id: "sales_matched",
+      group: "sales",
+      title: "Sales Matched Outward Supplies Register",
+      desc: "Verified sales invoices where taxable values and GST liabilities match perfectly between sales register and Form GSTR-1.",
+      badge: "Outward Matched",
+      frequency: "Monthly Filing",
     },
     {
-      id: "mismatches",
-      title: "Tax Value & Rate Discrepancy Report",
-      desc: "Filtered schedule of transactions where taxable values or GST amounts differ between company ledger and GST portal.",
-      badge: "Audit Variance",
-      frequency: "Immediate Action",
+      id: "sales_mismatches",
+      group: "sales",
+      title: "Sales Tax Value & Rate Discrepancy Report",
+      desc: "Filtered schedule of sales transactions where taxable value or GST rate differs between company books and GSTR-1 filing.",
+      badge: "Outward Variance",
+      frequency: "Immediate Review",
     },
     {
-      id: "missing",
-      title: "Missing Invoices (ITC at Risk / Unfiled Liability)",
-      desc: "Invoices present in internal registers but completely missing on the portal, representing unclaimed ITC or unfiled outward sales.",
+      id: "sales_missing",
+      group: "sales",
+      title: "Sales Invoices Missing in GSTR-1 (Unfiled Liability)",
+      desc: "Sales recorded in books but completely absent on the GST portal, representing unfiled outward tax liability requiring addition to GSTR-1.",
       badge: "Compliance Risk",
       frequency: "High Priority",
     },
     {
-      id: "anomalies",
-      title: "Statutory Anomaly & Exceptions Log",
-      desc: "Ranked exception audit log including duplicate invoices, large rate differences, and invalid counterparty GSTINs.",
-      badge: "Risk Audit",
+      id: "sales_extra",
+      group: "sales",
+      title: "Unrecorded Portal Sales (Extra on GSTR-1)",
+      desc: "Invoices filed on Form GSTR-1 but not found in the internal sales register, indicating omitted accounting entries.",
+      badge: "Ledger Omission",
       frequency: "Monthly Audit",
+    },
+    {
+      id: "sales_tax_liability",
+      group: "sales",
+      title: "Outward Tax Liability Variance Schedule",
+      desc: "Structured tax liability comparison schedule itemizing expected vs filed output tax for GSTR-3B Table 3.1 alignment.",
+      badge: "Liability Breakdown",
+      frequency: "GSTR-3B Preparation",
+    },
+
+    // ── Group 2: 6 Purchase & Inward ITC Reports ──
+    {
+      id: "purchases",
+      group: "purchases",
+      title: `Purchase & ITC Reconciliation Matrix (${purchaseSource === "gstr2b" ? "GSTR-2B" : "GSTR-2A"})`,
+      desc: `Comprehensive matching matrix between inward Purchase Register bills and ${purchaseSource === "gstr2b" ? "static auto-drafted Form GSTR-2B" : "dynamic Form GSTR-2A"} supplier filings.`,
+      badge: "Inward Verification",
+      frequency: "Monthly Tax Period",
+    },
+    {
+      id: "purchase_matched",
+      group: "purchases",
+      title: `Verified Eligible ITC Schedule (${purchaseSource === "gstr2b" ? "GSTR-2B" : "GSTR-2A"})`,
+      desc: "Inward bills with confirmed matching supplier filings, representing verified eligible Input Tax Credit for GSTR-3B Table 4(A).",
+      badge: "Confirmed ITC",
+      frequency: "Monthly Return",
+    },
+    {
+      id: "purchase_mismatches",
+      group: "purchases",
+      title: `Inward Tax Value & ITC Rate Variance Report`,
+      desc: "Inward vendor invoices where taxable value or GST amounts diverge between accounting books and supplier portal filings.",
+      badge: "ITC Variance",
+      frequency: "Vendor Action",
+    },
+    {
+      id: "purchase_missing",
+      group: "purchases",
+      title: `Purchase Invoices Missing on Portal (ITC at Risk)`,
+      desc: `Purchases booked in internal accounts but absent from ${purchaseSource === "gstr2b" ? "Form GSTR-2B" : "Form GSTR-2A"}, representing unconfirmed ITC requiring supplier communication.`,
+      badge: "At-Risk ITC",
+      frequency: "Urgent Vendor Follow-up",
+    },
+    {
+      id: "purchase_extra",
+      group: "purchases",
+      title: `Unbooked Supplier Filings (Extra Invoices on Portal)`,
+      desc: `Invoices filed by vendors on the GST portal that are not yet recorded in the purchase register, representing unbooked expenses and unclaimed ITC.`,
+      badge: "Unclaimed ITC",
+      frequency: "Accounts Payable Review",
+    },
+    {
+      id: "itc_eligibility_variance",
+      group: "purchases",
+      title: `ITC Eligibility & Statement Variance Schedule`,
+      desc: `Itemized comparison statement between purchase ledger claims and portal auto-drafted ITC statements for statutory compliance under Rule 36(4).`,
+      badge: "Rule 36(4) Audit",
+      frequency: "Monthly CA Review",
     },
   ];
 
-  if (loading) return <LoadingSkeleton />;
+  const filteredReports = categoryFilter === "all"
+    ? reportsList
+    : reportsList.filter((r) => r.group === categoryFilter);
+
+  if (loading && !summary) return <LoadingSkeleton />;
 
   return (
     <div className="animate-fade-in">
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
-          <h2 className="section-title">Statutory Audit & Export Reports</h2>
+          <h2 className="section-title">Statutory Audit & Export Reports Catalogue</h2>
           <p className="section-subtitle">
             Export structured reconciliation schedules for Chartered Accountants, management review, and compliance records
           </p>
         </div>
         <div className="section-badge">
           <FileText size={13} />
-          <span>5 Standard Export Schedules</span>
+          <span>12 Standard Audit Schedules</span>
         </div>
       </div>
 
@@ -131,17 +201,97 @@ export function ReportsPage() {
 
       {/* 3. Export Schedules List */}
       <div className="institutional-card">
-        <div className="card-header">
+        <div className="card-header" style={{ flexWrap: "wrap", gap: 12 }}>
           <div>
-            <h3 className="card-title">Available Export Schedules</h3>
+            <h3 className="card-title">Available Export Schedules (12 Reports)</h3>
             <p className="card-subtitle">
               Click export to download formatted CSV schedules with full transaction metadata and difference calculations
             </p>
           </div>
+
+          {/* Controls: Category Filter + Purchase Source Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {/* Purchase source toggle for purchase schedules */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Inward Source:</span>
+              <div
+                style={{
+                  display: "inline-flex",
+                  background: "#f1f5f9",
+                  padding: 2,
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <button
+                  type="button"
+                  className={`btn btn-sm ${purchaseSource === "gstr2a" ? "btn-primary" : "btn-secondary"}`}
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    height: 26,
+                    borderRadius: 4,
+                    fontWeight: purchaseSource === "gstr2a" ? 700 : 500,
+                  }}
+                  onClick={() => {
+                    setLoading(true);
+                    setPurchaseSource("gstr2a");
+                  }}
+                >
+                  GSTR-2A
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${purchaseSource === "gstr2b" ? "btn-primary" : "btn-secondary"}`}
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    height: 26,
+                    borderRadius: 4,
+                    fontWeight: purchaseSource === "gstr2b" ? 700 : 500,
+                  }}
+                  onClick={() => {
+                    setLoading(true);
+                    setPurchaseSource("gstr2b");
+                  }}
+                >
+                  GSTR-2B
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Tabs */}
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${categoryFilter === "all" ? "btn-primary" : "btn-secondary"}`}
+                style={{ fontSize: 12, height: 28, padding: "0 10px" }}
+                onClick={() => setCategoryFilter("all")}
+              >
+                All (12)
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${categoryFilter === "sales" ? "btn-primary" : "btn-secondary"}`}
+                style={{ fontSize: 12, height: 28, padding: "0 10px" }}
+                onClick={() => setCategoryFilter("sales")}
+              >
+                Sales / GSTR-1 (6)
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${categoryFilter === "purchases" ? "btn-primary" : "btn-secondary"}`}
+                style={{ fontSize: 12, height: 28, padding: "0 10px" }}
+                onClick={() => setCategoryFilter("purchases")}
+              >
+                Purchase & ITC (6)
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="reports-schedules-list">
-          {reportsList.map((rep) => (
+          {filteredReports.map((rep) => (
             <div key={rep.id} className="report-item-card">
               <div className="report-item-left">
                 <div className="report-icon-box">

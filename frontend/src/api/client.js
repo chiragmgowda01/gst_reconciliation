@@ -143,8 +143,12 @@ export const api = {
   },
 
   // Reconciliation
-  async getReconciliation() {
-    return request("/reconcile");
+  async getReconciliation(params = {}) {
+    const query = new URLSearchParams();
+    if (params.tax_period) query.set("tax_period", params.tax_period);
+    if (params.purchase_source) query.set("purchase_source", params.purchase_source);
+    const qs = query.toString();
+    return request(`/reconcile${qs ? `?${qs}` : ""}`);
   },
 
   async getGstr3bSummary(taxPeriod) {
@@ -209,17 +213,27 @@ export const api = {
     if (params.severity) query.set("severity", params.severity);
     if (params.type) query.set("type", params.type);
     if (params.search) query.set("search", params.search);
+    if (params.purchase_source) query.set("purchase_source", params.purchase_source);
+    if (params.include_ml !== undefined) query.set("include_ml", String(params.include_ml));
     const qs = query.toString();
     return request(`/anomalies${qs ? `?${qs}` : ""}`);
   },
 
-  async getReportsSummary() {
-    return request("/reports/summary");
+  async getReportsSummary(params = {}) {
+    const query = new URLSearchParams();
+    if (params.purchase_source) query.set("purchase_source", params.purchase_source);
+    if (params.tax_period) query.set("tax_period", params.tax_period);
+    const qs = query.toString();
+    return request(`/reports/summary${qs ? `?${qs}` : ""}`);
   },
 
-  getExportUrl(reportType) {
+  getExportUrl(reportType, purchaseSource = "gstr2a", taxPeriod = null) {
     const token = authStorage.getToken() || "";
     const bizId = authStorage.getActiveBusinessId() || "";
-    return `${API_BASE}/reports/export?report_type=${encodeURIComponent(reportType)}&token=${encodeURIComponent(token)}&biz_id=${encodeURIComponent(bizId)}`;
+    let url = `${API_BASE}/reports/export?report_type=${encodeURIComponent(reportType)}&purchase_source=${encodeURIComponent(purchaseSource)}&token=${encodeURIComponent(token)}&biz_id=${encodeURIComponent(bizId)}`;
+    if (taxPeriod) {
+      url += `&tax_period=${encodeURIComponent(taxPeriod)}`;
+    }
+    return url;
   },
 };

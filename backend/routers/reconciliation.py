@@ -32,9 +32,18 @@ def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
 @router.get("/reconcile")
 def run_reconciliation(
     tax_period: Optional[str] = Query(None, description="Optional tax period filter in YYYY-MM format (e.g., 2026-07)"),
+    purchase_source: str = Query("gstr2a", description="Purchase comparison source: gstr2a or gstr2b"),
     current_business: Business = Depends(get_current_business),
     db: Session = Depends(get_db),
 ):
+    # Validate purchase_source
+    norm_purchase_source = purchase_source.strip().lower()
+    if norm_purchase_source not in {"gstr2a", "gstr2b"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid purchase_source '{purchase_source}'. Must be 'gstr2a' or 'gstr2b'.",
+        )
+
     # Validate tax_period if provided (format YYYY-MM, month 01-12 only)
     start_date = None
     end_date = None
@@ -68,11 +77,12 @@ def run_reconciliation(
             detail="Reconciliation data is temporarily unavailable.",
         )
 
-    # Partition by the 4 valid source values
+    # Partition by the supported source values
     sales_reg = []
     gstr1_reg = []
     purchase_reg = []
     gstr2a_reg = []
+    gstr2b_reg = []
 
     for inv in invoices:
         item = {
@@ -90,16 +100,31 @@ def run_reconciliation(
             purchase_reg.append(item)
         elif inv.source == "gstr2a":
             gstr2a_reg.append(item)
+        elif inv.source == "gstr2b":
+            gstr2b_reg.append(item)
 
     cols = ["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount"]
     sales_df = pd.DataFrame(sales_reg) if sales_reg else pd.DataFrame(columns=cols)
     gstr1_df = pd.DataFrame(gstr1_reg) if gstr1_reg else pd.DataFrame(columns=cols)
     purchase_df = pd.DataFrame(purchase_reg) if purchase_reg else pd.DataFrame(columns=cols)
     gstr2a_df = pd.DataFrame(gstr2a_reg) if gstr2a_reg else pd.DataFrame(columns=cols)
+    gstr2b_df = pd.DataFrame(gstr2b_reg) if gstr2b_reg else pd.DataFrame(columns=cols)
 
-    # Execute safe reconciliation without dropping duplicates
+    # Reconcile sales vs GSTR-1
     sales_res_df = reconcile(sales_df, gstr1_df)
-    purchase_res_df = reconcile(purchase_df, gstr2a_df)
+
+    # Reconcile purchase vs selected GSTR-2A or GSTR-2B dataset
+    target_purchase_gst_df = gstr2b_df if norm_purchase_source == "gstr2b" else gstr2a_df
+    purchase_res_df = reconcile(purchase_df, target_purchase_gst_df)
+
+    # For GSTR-2B: add specific statutory note on missing records (do not assume automatic ineligibility)
+    if norm_purchase_source == "gstr2b" and not purchase_res_df.empty:
+        for idx in range(len(purchase_res_df)):
+            if purchase_res_df.at[idx, "status"] == "MISSING_IN_GST":
+                purchase_res_df.at[idx, "explanation"] = (
+                    "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
+                    "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
+                )
 
     sales_data = _df_to_records(sales_res_df)
     purchase_data = _df_to_records(purchase_res_df)
@@ -109,6 +134,7 @@ def run_reconciliation(
         "business_id": current_business.id,
         "business_name": current_business.name,
         "gstin": current_business.gstin,
+        "purchase_source": norm_purchase_source,
         "total_records": len(all_records),
         "matched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MATCH"),
         "mismatched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MISMATCH"),

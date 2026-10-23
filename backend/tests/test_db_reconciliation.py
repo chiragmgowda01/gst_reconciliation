@@ -1,3 +1,4 @@
+import io
 from datetime import date
 import pytest
 from fastapi.testclient import TestClient
@@ -585,3 +586,180 @@ def test_gstr3b_summary_contract_preserved(client, setup_tenants):
     assert "eligible_itc" in data
     assert "itc_reversed" in data
     assert "net_itc" in data
+
+
+def test_reconciliation_gstr2b_purchase_source(client, db_session, setup_tenants):
+    """Verify purchase reconciliation against GSTR-2B dataset."""
+    biz_a = setup_tenants["biz_a"]
+    token_a = setup_tenants["token_a"]
+
+    p_inv = Invoice(
+        invoice_no="PUR-2B-01",
+        invoice_date=date(2026, 7, 10),
+        gstin="29XYZAB9012J1Z9",
+        taxable_value=60000.0,
+        gst_amount=10800.0,
+        source="purchase_register",
+        business_id=biz_a.id,
+    )
+    gstr2b_inv = Invoice(
+        invoice_no="PUR-2B-01",
+        invoice_date=date(2026, 7, 10),
+        gstin="29XYZAB9012J1Z9",
+        taxable_value=60000.0,
+        gst_amount=10800.0,
+        source="gstr2b",
+        business_id=biz_a.id,
+    )
+    db_session.add_all([p_inv, gstr2b_inv])
+    db_session.commit()
+
+    res = client.get(
+        "/reconcile?purchase_source=gstr2b",
+        headers={"Authorization": f"Bearer {token_a}", "X-Business-ID": str(biz_a.id)},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["summary"]["purchase_source"] == "gstr2b"
+    p_matched = [p for p in data["purchases"] if p["invoice_no"] == "PUR-2B-01"]
+    assert len(p_matched) == 1
+    assert p_matched[0]["status"] == "MATCH"
+
+
+def test_reconciliation_invalid_purchase_source_returns_400(client, setup_tenants):
+    """Invalid purchase_source should return HTTP 400."""
+    biz_a = setup_tenants["biz_a"]
+    token_a = setup_tenants["token_a"]
+
+    res = client.get(
+        "/reconcile?purchase_source=invalid_source",
+        headers={"Authorization": f"Bearer {token_a}", "X-Business-ID": str(biz_a.id)},
+    )
+    assert res.status_code == 400
+    assert "Invalid purchase_source" in res.json()["detail"]
+
+
+def test_upload_csv_gstr2b(client, setup_tenants):
+    """Uploading a GSTR-2B CSV should be supported and succeed."""
+    biz_a = setup_tenants["biz_a"]
+    token_a = setup_tenants["token_a"]
+
+    csv_content = (
+        "invoice_no,invoice_date,supplier_gstin,taxable_value,gst_amount\n"
+        "UP-2B-01,2026-07-15,29AAAAA1111A1Z5,30000,5400\n"
+        "UP-2B-02,2026-07-16,29BBBBB2222B1Z5,45000,8100\n"
+    )
+
+    res = client.post(
+        "/invoices/upload",
+        headers={"Authorization": f"Bearer {token_a}", "X-Business-ID": str(biz_a.id)},
+        data={"source_type": "gstr2b"},
+        files={"file": ("gstr2b_sample.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["imported"] == 2
+    assert data["source_type"] == "gstr2b"
+
+
+def test_all_12_export_report_types(client, db_session, setup_tenants):
+    """All 12 items in the report catalogue should export properly formatted CSVs."""
+    biz_a = setup_tenants["biz_a"]
+    token_a = setup_tenants["token_a"]
+
+    # Seed data
+    db_session.add(Invoice(
+        invoice_no="REP-S01", invoice_date=date(2026, 7, 2),
+        gstin="29ABCDE1234F1Z5", taxable_value=20000.0, gst_amount=3600.0,
+        source="sales_register", business_id=biz_a.id,
+    ))
+    db_session.add(Invoice(
+        invoice_no="REP-S01", invoice_date=date(2026, 7, 2),
+        gstin="29ABCDE1234F1Z5", taxable_value=20000.0, gst_amount=3600.0,
+        source="gstr1", business_id=biz_a.id,
+    ))
+    db_session.add(Invoice(
+        invoice_no="REP-P01", invoice_date=date(2026, 7, 3),
+        gstin="29XYZAB9012J1Z9", taxable_value=15000.0, gst_amount=2700.0,
+        source="purchase_register", business_id=biz_a.id,
+    ))
+    db_session.add(Invoice(
+        invoice_no="REP-P01", invoice_date=date(2026, 7, 3),
+        gstin="29XYZAB9012J1Z9", taxable_value=15000.0, gst_amount=2700.0,
+        source="gstr2a", business_id=biz_a.id,
+    ))
+    db_session.commit()
+
+    report_catalogue = [
+        # 6 Sales
+        "sales",
+        "sales_matched",
+        "sales_mismatches",
+        "sales_missing",
+        "sales_extra",
+        "sales_tax_liability",
+        # 6 Purchase
+        "purchases",
+        "purchase_matched",
+        "purchase_mismatches",
+        "purchase_missing",
+        "purchase_extra",
+        "itc_eligibility_variance",
+    ]
+
+    for rep in report_catalogue:
+        res = client.get(
+            f"/reports/export?report_type={rep}&purchase_source=gstr2a",
+            headers={"Authorization": f"Bearer {token_a}", "X-Business-ID": str(biz_a.id)},
+        )
+        assert res.status_code == 200, f"Export for {rep} failed with {res.status_code}"
+        assert "text/csv" in res.headers["content-type"]
+        assert "attachment" in res.headers["content-disposition"]
+        assert ".csv" in res.headers["content-disposition"]
+        assert "invoice_no" in res.text or "status" in res.text
+
+
+def test_reports_summary_with_purchase_source(client, setup_tenants):
+    """Reports summary endpoint should return complete summary with purchase_source."""
+    biz_a = setup_tenants["biz_a"]
+    token_a = setup_tenants["token_a"]
+
+    res = client.get(
+        "/reports/summary?purchase_source=gstr2b",
+        headers={"Authorization": f"Bearer {token_a}", "X-Business-ID": str(biz_a.id)},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["purchase_source"] == "gstr2b"
+    assert "sales_summary" in data
+    assert "purchase_summary" in data
+    assert "anomalies_summary" in data
+    assert "audit_health_score" in data
+
+
+def test_multi_tenant_anomalies_no_customer_gstin_confusion(client, db_session, setup_tenants):
+    """Tenants must see their own anomalies even when customer GSTIN differs from tenant GSTIN."""
+    biz_b = setup_tenants["biz_b"]
+    token_b = setup_tenants["token_b"]
+
+    # Customer GSTIN is a distinct 3rd party, not biz_b.gstin
+    db_session.add(Invoice(
+        invoice_no="BIZ-B-INV-99",
+        invoice_date=date(2026, 7, 20),
+        gstin="29THIRDPARTY1Z5",
+        taxable_value=75000.0,
+        gst_amount=13500.0,
+        source="sales_register",
+        business_id=biz_b.id,
+    ))
+    db_session.commit()
+
+    res = client.get(
+        "/anomalies",
+        headers={"Authorization": f"Bearer {token_b}", "X-Business-ID": str(biz_b.id)},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    # Must identify the MISSING_IN_GST anomaly for biz_b
+    inv_nos = [item["invoice_no"] for item in data["items"]]
+    assert "BIZ-B-INV-99" in inv_nos

@@ -35,17 +35,18 @@ export function App() {
   const [error, setError] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [purchaseSource, setPurchaseSource] = useState("gstr2a");
 
-  const loadDashboardData = useCallback(async (showRefreshing = false) => {
+  const loadDashboardData = useCallback(async (showRefreshing = false, pSource = purchaseSource) => {
     if (showRefreshing) setIsRefreshing(true);
     else setLoading(true);
     setError("");
 
     try {
       const [recRes, gstr3bRes, anomRes] = await Promise.all([
-        api.getReconciliation(),
+        api.getReconciliation({ purchase_source: pSource }),
         api.getGstr3bSummary(),
-        api.getAnomalies(),
+        api.getAnomalies({ purchase_source: pSource }),
       ]);
 
       setReconciliationData(recRes);
@@ -58,7 +59,13 @@ export function App() {
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [purchaseSource]);
+
+  const handlePurchaseSourceChange = (newSource) => {
+    if (newSource === purchaseSource) return;
+    setPurchaseSource(newSource);
+    loadDashboardData(false, newSource);
+  };
 
   // Initial Auth Check
   useEffect(() => {
@@ -108,9 +115,9 @@ export function App() {
     let ignore = false;
 
     Promise.all([
-      api.getReconciliation(),
+      api.getReconciliation({ purchase_source: purchaseSource }),
       api.getGstr3bSummary(),
-      api.getAnomalies(),
+      api.getAnomalies({ purchase_source: purchaseSource }),
     ])
       .then(([recRes, gstr3bRes, anomRes]) => {
         if (!ignore) {
@@ -131,7 +138,7 @@ export function App() {
     return () => {
       ignore = true;
     };
-  }, [user, activeBusiness]);
+  }, [user, activeBusiness, purchaseSource]);
 
   const handleLoginSuccess = (userData, userBusinesses) => {
     setUser(userData);
@@ -246,6 +253,8 @@ export function App() {
                 <PurchaseReconciliationPage
                   purchases={purchases}
                   onSelectInvoice={setSelectedInvoice}
+                  purchaseSource={purchaseSource}
+                  onSelectPurchaseSource={handlePurchaseSourceChange}
                 />
               )}
 

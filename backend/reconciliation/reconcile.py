@@ -69,6 +69,9 @@ def reconcile(my_source, gst_source):
             if tv_diff == 0 and gst_diff == 0:
                 status = "MATCH"
                 explanation = "Invoice matched across both internal records and GST portal."
+                category = "MATCH"
+                possible_causes = []
+                action = "No action required. Reconciled successfully."
             else:
                 status = "MISMATCH"
                 diff_reasons = []
@@ -77,6 +80,13 @@ def reconcile(my_source, gst_source):
                 if gst_diff != 0:
                     diff_reasons.append(f"GST amount differs by Rs. {abs(gst_diff):,.2f}")
                 explanation = ". ".join(diff_reasons) + " between internal books and GST filing."
+                category = "TAXABLE_AND_GST_MISMATCH" if (tv_diff != 0 and gst_diff != 0) else ("TAXABLE_VALUE_MISMATCH" if tv_diff != 0 else "GST_AMOUNT_MISMATCH")
+                possible_causes = [
+                    "Hypothesis: Data entry discrepancy in taxable value or rate in internal ledger.",
+                    "Hypothesis: Commercial discount or credit/debit note applied on one side only.",
+                    "Hypothesis: Rounding difference across line items.",
+                ]
+                action = "Compare physical invoice copy against filed portal return. Request amendment or credit/debit note if needed."
 
             results.append({
                 "invoice_no": inv,
@@ -93,6 +103,9 @@ def reconcile(my_source, gst_source):
                 "gst_amount_diff": gst_diff,
                 "explanation": explanation,
                 "reason": explanation,
+                "discrepancy_category": category,
+                "possible_causes": possible_causes,
+                "suggested_action": action,
             })
         else:
             # Safe duplicate handling: preserve every row without silent .iloc[0] drop
@@ -127,6 +140,12 @@ def reconcile(my_source, gst_source):
                     "gst_amount_diff": gst_diff,
                     "explanation": explanation,
                     "reason": explanation,
+                    "discrepancy_category": "DUPLICATE_INVOICE",
+                    "possible_causes": [
+                        "Hypothesis: Multiple bills entered under identical numbering in internal accounting.",
+                        "Hypothesis: Portal return filing contains duplicate entries or uncancelled original record alongside amendment.",
+                    ],
+                    "suggested_action": "Verify underlying invoice originals; eliminate duplicate entries prior to statutory submission.",
                 })
 
     for inv in sorted(only_my):
@@ -155,6 +174,13 @@ def reconcile(my_source, gst_source):
                 "gst_amount_diff": None,
                 "explanation": explanation,
                 "reason": explanation,
+                "discrepancy_category": "MISSING_IN_GST",
+                "possible_causes": [
+                    "Hypothesis: Outward supply invoice not yet uploaded/submitted to GST portal.",
+                    "Hypothesis: Inward purchase: Supplier has not filed GSTR-1, or filed after monthly cut-off date.",
+                    "Hypothesis: Invoice recorded in a different tax period in internal books.",
+                ],
+                "suggested_action": "For outward sales, add invoice to pending GSTR-1 filing. For purchases, contact supplier to file return before claiming ITC.",
             })
 
     for inv in sorted(only_gst):
@@ -183,6 +209,13 @@ def reconcile(my_source, gst_source):
                 "gst_amount_diff": None,
                 "explanation": explanation,
                 "reason": explanation,
+                "discrepancy_category": "EXTRA_IN_GST",
+                "possible_causes": [
+                    "Hypothesis: Invoice booked on portal was omitted from internal ledger.",
+                    "Hypothesis: Counterparty reported incorrect recipient GSTIN on the portal.",
+                    "Hypothesis: Goods/services received and recorded in a preceding or succeeding accounting month.",
+                ],
+                "suggested_action": "Verify delivery challan and receipt of goods; book in purchase ledger if valid, or alert supplier if billed in error.",
             })
 
     return pd.DataFrame(results)
@@ -211,4 +244,4 @@ if __name__ == "__main__":
     )
 
     show_result("SALES RECONCILIATION: SALES REGISTER vs GSTR-1", sales_result)
-    show_result("PURCHASE RECONCILIATION: PURCHASE REGISTER vs GSTR-2A", purchase_result)
+    show_result("PURCHASE RECONCILIATION: PURCHASE REGISTER vs GSTR-2A", purchase_result)

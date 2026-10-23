@@ -18,6 +18,7 @@ def list_anomalies(
     type: Optional[str] = Query(None, description="Filter by anomaly type"),
     search: Optional[str] = Query(None, description="Search by invoice number or GSTIN"),
     include_ml: bool = Query(True, description="Include Isolation Forest ML-flagged patterns"),
+    purchase_source: str = Query("gstr2a", description="Purchase source: gstr2a or gstr2b"),
     current_business: Business = Depends(get_current_business),
     db: Session = Depends(get_db),
 ):
@@ -33,22 +34,21 @@ def list_anomalies(
         ML_UNUSUAL_PATTERN — statistically unusual numerical transaction patterns.
         These do NOT constitute legal findings.
     """
-    sales_df, purchase_df = get_business_reconciled_dfs(current_business, db)
+    norm_ps = purchase_source.strip().lower() if purchase_source else "gstr2a"
+    if norm_ps not in {"gstr2a", "gstr2b"}:
+        norm_ps = "gstr2a"
+
+    sales_df, purchase_df = get_business_reconciled_dfs(current_business, db, purchase_source=norm_ps)
 
     # Deterministic rule-based anomalies
-    rule_anomalies = get_all_anomalies(sales_df=sales_df, purchase_df=purchase_df)
-    if current_business.id != 1:
-        rule_anomalies = [a for a in rule_anomalies if a.get("gstin") == current_business.gstin]
+    purchase_label = "GSTR-2B" if norm_ps == "gstr2b" else "GSTR-2A"
+    rule_anomalies = get_all_anomalies(sales_df=sales_df, purchase_df=purchase_df, purchase_label=purchase_label)
 
     # Isolation Forest ML anomalies (complementary, not replacement)
     ml_anomalies: list = []
     ml_meta: dict = {"ml_available": False, "reason": "ML analysis not requested."}
     if include_ml:
         ml_anomalies_raw, ml_meta = get_ml_anomalies(sales_df, purchase_df)
-        if current_business.id != 1:
-            ml_anomalies_raw = [
-                a for a in ml_anomalies_raw if a.get("gstin") == current_business.gstin
-            ]
         # De-duplicate: skip ML flag if the same invoice is already flagged by rules
         rule_invoice_nos = {a["invoice_no"] for a in rule_anomalies}
         ml_anomalies = [

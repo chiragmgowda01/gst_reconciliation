@@ -154,3 +154,84 @@ def test_gstr3b_cross_form_note_field_present(client, setup_user_biz):
     note = data.get("note", "")
     assert "investigation" in note.lower() or "consult" in note.lower(), \
         "Response note must disclaim investigation-only purpose"
+
+
+def test_gstr3b_invalid_tax_period_raises_400(client, setup_user_biz):
+    """Invalid tax_period formats must return HTTP 400 on both summary and cross-form."""
+    biz = setup_user_biz["biz"]
+    token = setup_user_biz["token"]
+    headers = {"Authorization": f"Bearer {token}", "X-Business-ID": str(biz.id)}
+
+    for invalid_period in ["2026-13", "2026-00", "2026/07", "July-2026", "2026-7", "invalid"]:
+        # Test summary endpoint
+        res_sum = client.get(f"/gstr3b/summary?tax_period={invalid_period}", headers=headers)
+        assert res_sum.status_code == 400, f"Expected 400 for summary with period '{invalid_period}'"
+        assert "Invalid tax_period format" in res_sum.json()["detail"]
+
+        # Test cross-form endpoint
+        res_cf = client.get(f"/gstr3b/cross-form?tax_period={invalid_period}", headers=headers)
+        assert res_cf.status_code == 400, f"Expected 400 for cross-form with period '{invalid_period}'"
+        assert "Invalid tax_period format" in res_cf.json()["detail"]
+
+
+def test_gstr3b_cross_form_with_gstr2b_invoices(client, setup_user_biz):
+    """When GSTR-2B invoices exist in DB, cross-form should reflect GSTR-2B sums and findings."""
+    biz = setup_user_biz["biz"]
+    token = setup_user_biz["token"]
+    session = setup_user_biz["session"]
+
+    session.add(Invoice(
+        invoice_no="CF-P001", invoice_date=date(2026, 7, 5),
+        gstin="29XYZAB9012J1Z9", taxable_value=40000.0, gst_amount=7200.0,
+        source="purchase_register", business_id=biz.id
+    ))
+    session.add(Invoice(
+        invoice_no="CF-P001", invoice_date=date(2026, 7, 5),
+        gstin="29XYZAB9012J1Z9", taxable_value=40000.0, gst_amount=7200.0,
+        source="gstr2b", business_id=biz.id
+    ))
+    session.commit()
+
+    res = client.get(
+        "/gstr3b/cross-form?tax_period=2026-07",
+        headers={"Authorization": f"Bearer {token}", "X-Business-ID": str(biz.id)},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["register_sums"]["gstr2b_gst"] == 7200.0
+    assert "purchase_register_vs_gstr2b_gst" in data["cross_form_differences"]
+    # Check for GSTR-2B integration status finding
+    f_ids = [f["finding_id"] for f in data["findings"]]
+    assert "cf-gstr2b-status" in f_ids
+
+
+def test_gstr3b_cross_form_findings_hypotheses_tone(client, setup_user_biz):
+    """Findings must provide possible causes as hypotheses and recommend investigation."""
+    biz = setup_user_biz["biz"]
+    token = setup_user_biz["token"]
+    session = setup_user_biz["session"]
+
+    # Introduce a mismatch between sales register and gstr1
+    session.add(Invoice(
+        invoice_no="CF-S010", invoice_date=date(2026, 7, 10),
+        gstin="29ABCDE1234F1Z5", taxable_value=100000.0, gst_amount=18000.0,
+        source="sales_register", business_id=biz.id
+    ))
+    session.add(Invoice(
+        invoice_no="CF-S010", invoice_date=date(2026, 7, 10),
+        gstin="29ABCDE1234F1Z5", taxable_value=80000.0, gst_amount=14400.0,
+        source="gstr1", business_id=biz.id
+    ))
+    session.commit()
+
+    res = client.get(
+        "/gstr3b/cross-form?tax_period=2026-07",
+        headers={"Authorization": f"Bearer {token}", "X-Business-ID": str(biz.id)},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    sales_finding = next((f for f in data["findings"] if f["finding_id"] == "cf-sales-gstr1-diff"), None)
+    assert sales_finding is not None
+    assert "possible_causes" in sales_finding
+    assert any("Hypothesis" in cause for cause in sales_finding["possible_causes"])
+    assert "Investigate" in sales_finding["recommendation"] or "review" in sales_finding["recommendation"].lower()
