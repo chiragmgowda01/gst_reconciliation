@@ -29,6 +29,7 @@ export function App() {
   const [reconciliationData, setReconciliationData] = useState(null);
   const [gstr3b, setGstr3b] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
+  const [mlMeta, setMlMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -50,6 +51,7 @@ export function App() {
       setReconciliationData(recRes);
       setGstr3b(gstr3bRes);
       setAnomalies(anomRes?.items || []);
+      setMlMeta(anomRes?.ml_meta || null);
     } catch (err) {
       setError(err.message || "Failed to communicate with the GST reconciliation server.");
     } finally {
@@ -115,6 +117,7 @@ export function App() {
           setReconciliationData(recRes);
           setGstr3b(gstr3bRes);
           setAnomalies(anomRes?.items || []);
+          setMlMeta(anomRes?.ml_meta || null);
           setLoading(false);
         }
       })
@@ -149,6 +152,7 @@ export function App() {
     setReconciliationData(null);
     setGstr3b(null);
     setAnomalies([]);
+    setMlMeta(null);
   };
 
   const handleSelectBusiness = (biz) => {
@@ -256,6 +260,7 @@ export function App() {
               {currentTab === "anomalies" && (
                 <AnomaliesPage
                   anomalies={anomalies}
+                  mlMeta={mlMeta}
                 />
               )}
 

@@ -75,7 +75,8 @@ async function request(endpoint, options = {}) {
       (err.message && (err.message.toLowerCase().includes("fetch") || err.message.toLowerCase().includes("network")))
     ) {
       throw new Error(
-        `Unable to connect to the backend API server at ${API_BASE}. Please ensure the server is running and accessible.`
+        `Unable to connect to the backend API server at ${API_BASE}. Please ensure the server is running and accessible.`,
+        { cause: err }
       );
     }
     throw err;
@@ -146,8 +147,14 @@ export const api = {
     return request("/reconcile");
   },
 
-  async getGstr3bSummary() {
-    return request("/gstr3b/summary");
+  async getGstr3bSummary(taxPeriod) {
+    const qs = taxPeriod ? `?tax_period=${encodeURIComponent(taxPeriod)}` : "";
+    return request(`/gstr3b/summary${qs}`);
+  },
+
+  async getGstr3bCrossForm(taxPeriod) {
+    const qs = taxPeriod ? `?tax_period=${encodeURIComponent(taxPeriod)}` : "";
+    return request(`/gstr3b/cross-form${qs}`);
   },
 
   async getInvoices(params = {}) {

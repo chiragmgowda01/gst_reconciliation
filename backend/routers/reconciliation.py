@@ -2,7 +2,7 @@ import calendar
 from datetime import date
 import json
 import re
-from typing import Optional
+from typing import Any, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 import pandas as pd
@@ -15,6 +15,18 @@ from reconciliation.reconcile import reconcile
 from services.auth import get_current_business
 
 router = APIRouter(tags=["Reconciliation"])
+
+
+def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+    json_str = df.to_json(orient="records")
+    if json_str is None:
+        return []
+    records = json.loads(json_str)
+    if isinstance(records, list):
+        return cast(list[dict[str, Any]], records)
+    return []
 
 
 @router.get("/reconcile")
@@ -89,19 +101,19 @@ def run_reconciliation(
     sales_res_df = reconcile(sales_df, gstr1_df)
     purchase_res_df = reconcile(purchase_df, gstr2a_df)
 
-    sales_data = json.loads(sales_res_df.to_json(orient="records")) if not sales_res_df.empty else []
-    purchase_data = json.loads(purchase_res_df.to_json(orient="records")) if not purchase_res_df.empty else []
+    sales_data = _df_to_records(sales_res_df)
+    purchase_data = _df_to_records(purchase_res_df)
 
-    all_records = sales_data + purchase_data
+    all_records: list[dict[str, Any]] = sales_data + purchase_data
     summary = {
         "business_id": current_business.id,
         "business_name": current_business.name,
         "gstin": current_business.gstin,
         "total_records": len(all_records),
-        "matched": sum(1 for r in all_records if r.get("status") == "MATCH"),
-        "mismatched": sum(1 for r in all_records if r.get("status") == "MISMATCH"),
-        "missing_in_gst": sum(1 for r in all_records if r.get("status") == "MISSING_IN_GST"),
-        "extra_in_gst": sum(1 for r in all_records if r.get("status") == "EXTRA_IN_GST"),
+        "matched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MATCH"),
+        "mismatched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MISMATCH"),
+        "missing_in_gst": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MISSING_IN_GST"),
+        "extra_in_gst": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "EXTRA_IN_GST"),
     }
 
     return {
@@ -109,4 +121,4 @@ def run_reconciliation(
         "purchases": purchase_data,
         "summary": summary,
     }
-
+

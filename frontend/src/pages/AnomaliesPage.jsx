@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
-import { ShieldAlert, AlertTriangle, AlertCircle, HelpCircle, Search, Filter, CheckCircle2 } from "lucide-react";
+import { ShieldAlert, AlertTriangle, AlertCircle, HelpCircle, Search, Filter, CheckCircle2, Brain } from "lucide-react";
 import { StatusBadge } from "../components/StatusBadge";
 import { KPICard } from "../components/KPICard";
 
-export function AnomaliesPage({ anomalies = [] }) {
+export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -35,18 +35,49 @@ export function AnomaliesPage({ anomalies = [] }) {
     }).format(val);
   };
 
+  const mlCount = anomalies.filter((a) => a.type === "ML_UNUSUAL_PATTERN").length;
+
   return (
     <div className="animate-fade-in">
+      {/* ML Analysis Status Banner */}
+      {mlMeta && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 16px",
+            marginBottom: 16,
+            borderRadius: 8,
+            background: mlMeta.ml_available ? "#ecfdf5" : "#f8fafc",
+            border: `1px solid ${mlMeta.ml_available ? "#6ee7b7" : "#e2e8f0"}`,
+            fontSize: 12.5,
+            color: mlMeta.ml_available ? "#065f46" : "#64748b",
+          }}
+        >
+          <Brain size={15} color={mlMeta.ml_available ? "#059669" : "#94a3b8"} />
+          <span>
+            <strong>Isolation Forest ML Analysis:</strong>{" "}
+            {mlMeta.ml_available
+              ? `Active — analysed ${mlMeta.n_records_used} records, flagged ${mlMeta.n_outliers} unusual patterns.`
+              : mlMeta.reason || "Not available."}
+          </span>
+          {!mlMeta.ml_available && (
+            <span style={{ marginLeft: 4, color: "#94a3b8" }}>(Deterministic rules still active)</span>
+          )}
+        </div>
+      )}
+
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
           <h2 className="section-title">Anomaly & Risk Analysis Center</h2>
           <p className="section-subtitle">
-            Deterministic audit rules evaluating reconciliation exceptions, value variances, and filing gaps
+            Deterministic audit rules + Isolation Forest ML analysis for reconciliation exceptions and unusual patterns
           </p>
         </div>
         <div className="section-badge">
-          {anomalies.length} Potential Anomalies Tracked
+          {anomalies.length} Potential Anomalies Tracked ({mlCount} ML-Scored)
         </div>
       </div>
 
@@ -140,6 +171,7 @@ export function AnomaliesPage({ anomalies = [] }) {
               <option value="ALL">All Exception Types</option>
               <option value="MISSING_IN_GST">Missing in GST</option>
               <option value="EXTRA_IN_GST">Extra on Portal</option>
+              <option value="ML_UNUSUAL_PATTERN">ML Unusual Pattern</option>
               <option value="LARGE_TAX_DIFFERENCE">Tax Discrepancy</option>
               <option value="MISMATCH">Value Mismatch</option>
               <option value="DUPLICATE_INVOICE">Duplicate Invoice</option>
@@ -193,8 +225,15 @@ export function AnomaliesPage({ anomalies = [] }) {
                     <td className="mono-cell">{item.gstin || "—"}</td>
                     <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.source}</td>
                     <td style={{ fontSize: 12, fontWeight: 600 }}>
-                      <span className="anomaly-type-tag">
-                        {item.type ? item.type.replace(/_/g, " ") : "Unusual Pattern"}
+                      <span
+                        className="anomaly-type-tag"
+                        style={item.type === "ML_UNUSUAL_PATTERN" ? { background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" } : {}}
+                      >
+                        {item.type === "ML_UNUSUAL_PATTERN" ? (
+                          <><Brain size={10} style={{ display: "inline", marginRight: 3 }} />ML Pattern</>
+                        ) : (
+                          item.type ? item.type.replace(/_/g, " ") : "Unusual Pattern"
+                        )}
                       </span>
                     </td>
                     <td>

@@ -27,13 +27,31 @@ from routers.invoices import router as invoices_router, upload_csv
 from routers.reconciliation import router as reconciliation_router
 from routers.reports import router as reports_router
 
-# Initialize database schema safely
-Base.metadata.create_all(bind=engine)
+import logging
+from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize database schema safely during application lifespan startup
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database schema verified and initialized.")
+    except Exception as _schema_exc:
+        logger.warning(
+            "Database schema initialisation skipped at startup: %s — using test/offline mode.",
+            _schema_exc,
+        )
+    yield
+
 
 app = FastAPI(
     title="Automated MSME GST Reconciliation and Anomaly Detector",
     version="1.0.0",
     description="Production-style GST reconciliation, exception management, and GSTR compliance system for MSMEs.",
+    lifespan=lifespan,
 )
 
 # Robust CORS configuration compliant with credentials and custom headers
@@ -74,10 +92,18 @@ app.add_api_route("/upload", upload_csv, methods=["POST"], tags=["Invoices"])
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    # Hide raw internal traces from production responses
+    # Hide raw internal traces from production responses while preserving CORS
+    origin = request.headers.get("origin", "*")
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "*",
+    }
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred. Please check backend logs."},
+        headers=headers,
     )
 
 
@@ -105,4 +131,4 @@ def health():
     return {
         "status": "ok",
         "database": "connected",
-    }
+    }
