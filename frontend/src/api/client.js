@@ -227,6 +227,88 @@ export const api = {
     return request(`/reports/summary${qs ? `?${qs}` : ""}`);
   },
 
+  async downloadReport(reportType, purchaseSource = "gstr2a", taxPeriod = null) {
+    const query = new URLSearchParams();
+    query.set("report_type", reportType);
+    query.set("purchase_source", purchaseSource);
+    if (taxPeriod) query.set("tax_period", taxPeriod);
+
+    const token = authStorage.getToken();
+    const bizId = authStorage.getActiveBusinessId();
+
+    const headers = {
+      Accept: "text/csv, application/json, */*",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    if (bizId) {
+      headers["X-Business-ID"] = String(bizId);
+    }
+
+    let response;
+    try {
+      response = await fetch(`${API_BASE}/reports/export?${query.toString()}`, {
+        method: "GET",
+        headers,
+      });
+    } catch (netErr) {
+      throw new Error(
+        `Network error: Unable to connect to backend at ${API_BASE}. Please ensure server is running.`,
+        { cause: netErr }
+      );
+    }
+
+    if (response.status === 401) {
+      authStorage.clear();
+      window.dispatchEvent(new Event("auth:unauthorized"));
+      throw new Error("Your session has expired or authentication is missing. Please sign in again.");
+    }
+
+    if (!response.ok) {
+      let errorMsg = `Server error (${response.status})`;
+      try {
+        const errorJson = await response.json();
+        if (errorJson && errorJson.detail) {
+          errorMsg = typeof errorJson.detail === "string" ? errorJson.detail : JSON.stringify(errorJson.detail);
+        }
+      } catch {
+        try {
+          const text = await response.text();
+          if (text) errorMsg = text;
+        } catch {
+          // ignore
+        }
+      }
+      throw new Error(errorMsg);
+    }
+
+    // Extract filename from Content-Disposition header if available
+    let filename = `gst_${reportType}_${purchaseSource}${taxPeriod ? `_${taxPeriod.replace('-', '_')}` : ""}.csv`;
+    const disposition = response.headers.get("content-disposition");
+    if (disposition) {
+      const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = decodeURIComponent(filenameMatch[1].trim());
+      }
+    }
+
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl);
+    }, 2000);
+
+    return { success: true, filename, size: blob.size };
+  },
+
   getExportUrl(reportType, purchaseSource = "gstr2a", taxPeriod = null) {
     const token = authStorage.getToken() || "";
     const bizId = authStorage.getActiveBusinessId() || "";

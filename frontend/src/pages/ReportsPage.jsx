@@ -1,5 +1,16 @@
 import { useState, useEffect } from "react";
-import { Download, FileSpreadsheet, CheckCircle2, AlertTriangle, ShieldCheck, FileText } from "lucide-react";
+import {
+  Download,
+  FileSpreadsheet,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  ShieldCheck,
+  FileText,
+  RotateCw,
+  Info,
+  Calendar,
+} from "lucide-react";
 import { api } from "../api/client";
 import { KPICard } from "../components/KPICard";
 import { LoadingSkeleton } from "../components/LoadingSkeleton";
@@ -9,28 +20,52 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [purchaseSource, setPurchaseSource] = useState("gstr2a");
+  const [taxPeriod, setTaxPeriod] = useState("2026-07");
+
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [downloadError, setDownloadError] = useState("");
+  const [downloadSuccess, setDownloadSuccess] = useState("");
 
   useEffect(() => {
     let ignore = false;
-    api.getReportsSummary({ purchase_source: purchaseSource })
+    api.getReportsSummary({
+      purchase_source: purchaseSource,
+      tax_period: taxPeriod || undefined,
+    })
       .then((data) => {
         if (!ignore) {
           setSummary(data);
           setLoading(false);
         }
       })
-      .catch(() => {
-        if (!ignore) setLoading(false);
+      .catch((err) => {
+        if (!ignore) {
+          setLoading(false);
+          setDownloadError(err.message || "Failed to load report summary metrics from server.");
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, [purchaseSource]);
+  }, [purchaseSource, taxPeriod]);
 
-  const handleExport = (type) => {
-    const url = api.getExportUrl(type, purchaseSource);
-    window.open(url, "_blank");
+  const handleExport = async (type, title) => {
+    setDownloadingId(type);
+    setDownloadError("");
+    setDownloadSuccess("");
+
+    try {
+      const res = await api.downloadReport(type, purchaseSource, taxPeriod || null);
+      if (res && res.success) {
+        setDownloadSuccess(`Successfully triggered download for "${res.filename || title}" (${(res.size / 1024).toFixed(1)} KB).`);
+        setTimeout(() => setDownloadSuccess(""), 4500);
+      }
+    } catch (err) {
+      setDownloadError(err.message || `Download failed for report: ${title}. Please check server connectivity.`);
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   const reportsList = [
@@ -39,7 +74,7 @@ export function ReportsPage() {
       id: "sales",
       group: "sales",
       title: "Sales Reconciliation Register Schedule",
-      desc: "Complete matching matrix of internal Sales Register invoices against filed GSTR-1 returns with difference calculations.",
+      desc: "Complete matching matrix of internal Sales Register invoices against Form GSTR-1 outward returns with difference calculations.",
       badge: "Outward Supplies",
       frequency: "Monthly Tax Period",
     },
@@ -47,7 +82,7 @@ export function ReportsPage() {
       id: "sales_matched",
       group: "sales",
       title: "Sales Matched Outward Supplies Register",
-      desc: "Verified sales invoices where taxable values and GST liabilities match perfectly between sales register and Form GSTR-1.",
+      desc: "Verified sales invoices where taxable values and GST liabilities match between sales register and Form GSTR-1.",
       badge: "Outward Matched",
       frequency: "Monthly Filing",
     },
@@ -55,7 +90,7 @@ export function ReportsPage() {
       id: "sales_mismatches",
       group: "sales",
       title: "Sales Tax Value & Rate Discrepancy Report",
-      desc: "Filtered schedule of sales transactions where taxable value or GST rate differs between company books and GSTR-1 filing.",
+      desc: "Filtered schedule of sales transactions where taxable value or GST amount differs between company books and GSTR-1 return.",
       badge: "Outward Variance",
       frequency: "Immediate Review",
     },
@@ -63,14 +98,14 @@ export function ReportsPage() {
       id: "sales_missing",
       group: "sales",
       title: "Sales Invoices Missing in GSTR-1 (Unfiled Liability)",
-      desc: "Sales recorded in books but completely absent on the GST portal, representing unfiled outward tax liability requiring addition to GSTR-1.",
+      desc: "Sales recorded in internal books but absent in Form GSTR-1, representing unfiled outward tax liability requiring addition to GSTR-1.",
       badge: "Compliance Risk",
       frequency: "High Priority",
     },
     {
       id: "sales_extra",
       group: "sales",
-      title: "Unrecorded Portal Sales (Extra on GSTR-1)",
+      title: "Unrecorded Return Sales (Extra on GSTR-1)",
       desc: "Invoices filed on Form GSTR-1 but not found in the internal sales register, indicating omitted accounting entries.",
       badge: "Ledger Omission",
       frequency: "Monthly Audit",
@@ -89,7 +124,7 @@ export function ReportsPage() {
       id: "purchases",
       group: "purchases",
       title: `Purchase & ITC Reconciliation Matrix (${purchaseSource === "gstr2b" ? "GSTR-2B" : "GSTR-2A"})`,
-      desc: `Comprehensive matching matrix between inward Purchase Register bills and ${purchaseSource === "gstr2b" ? "static auto-drafted Form GSTR-2B" : "dynamic Form GSTR-2A"} supplier filings.`,
+      desc: `Comprehensive matching matrix between inward Purchase Register bills and ${purchaseSource === "gstr2b" ? "static auto-drafted Form GSTR-2B statement" : "imported dynamic Form GSTR-2A supplier filings"}.`,
       badge: "Inward Verification",
       frequency: "Monthly Tax Period",
     },
@@ -105,14 +140,14 @@ export function ReportsPage() {
       id: "purchase_mismatches",
       group: "purchases",
       title: `Inward Tax Value & ITC Rate Variance Report`,
-      desc: "Inward vendor invoices where taxable value or GST amounts diverge between accounting books and supplier portal filings.",
+      desc: "Inward vendor invoices where taxable value or GST amounts diverge between accounting books and supplier filings.",
       badge: "ITC Variance",
       frequency: "Vendor Action",
     },
     {
       id: "purchase_missing",
       group: "purchases",
-      title: `Purchase Invoices Missing on Portal (ITC at Risk)`,
+      title: `Purchase Invoices Missing in Supplier Filings (ITC at Risk)`,
       desc: `Purchases booked in internal accounts but absent from ${purchaseSource === "gstr2b" ? "Form GSTR-2B" : "Form GSTR-2A"}, representing unconfirmed ITC requiring supplier communication.`,
       badge: "At-Risk ITC",
       frequency: "Urgent Vendor Follow-up",
@@ -120,8 +155,8 @@ export function ReportsPage() {
     {
       id: "purchase_extra",
       group: "purchases",
-      title: `Unbooked Supplier Filings (Extra Invoices on Portal)`,
-      desc: `Invoices filed by vendors on the GST portal that are not yet recorded in the purchase register, representing unbooked expenses and unclaimed ITC.`,
+      title: `Unbooked Supplier Filings (Extra Invoices in Statement)`,
+      desc: `Invoices filed by vendors that are not yet recorded in the purchase register, representing unbooked expenses and unclaimed ITC.`,
       badge: "Unclaimed ITC",
       frequency: "Accounts Payable Review",
     },
@@ -129,7 +164,7 @@ export function ReportsPage() {
       id: "itc_eligibility_variance",
       group: "purchases",
       title: `ITC Eligibility & Statement Variance Schedule`,
-      desc: `Itemized comparison statement between purchase ledger claims and portal auto-drafted ITC statements for statutory compliance under Rule 36(4).`,
+      desc: `Itemized comparison statement between purchase ledger claims and auto-drafted ITC statements for statutory compliance under Rule 36(4).`,
       badge: "Rule 36(4) Audit",
       frequency: "Monthly CA Review",
     },
@@ -143,6 +178,47 @@ export function ReportsPage() {
 
   return (
     <div className="animate-fade-in">
+      {/* Demo / Synthetic Data Mode Transparency Banner */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 16px",
+          marginBottom: 16,
+          borderRadius: 8,
+          background: "#fffbeb",
+          border: "1px solid #fde68a",
+          color: "#92400e",
+          fontSize: 12.5,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Info size={16} color="#d97706" />
+          <span>
+            <strong>DATA SOURCE TRANSPARENCY:</strong> Report exports are generated from{" "}
+            {summary?.is_synthetic_demo
+              ? "local synthetic demonstration files (DEMO MODE)"
+              : "active tenant database records"}.{" "}
+            Live GST Common Portal API integration is intentionally disconnected. GSTR-2A reflects imported supplier filing records; GSTR-2B reflects period static statements.
+          </span>
+        </div>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 11,
+            background: "#fef3c7",
+            padding: "2px 8px",
+            borderRadius: 4,
+            border: "1px solid #f59e0b",
+          }}
+        >
+          {summary?.is_synthetic_demo ? "DEMO / SYNTHETIC DATA" : "LOCAL TENANT DB"}
+        </span>
+      </div>
+
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
@@ -156,6 +232,59 @@ export function ReportsPage() {
           <span>12 Standard Audit Schedules</span>
         </div>
       </div>
+
+      {/* Download Alert Banners */}
+      {downloadError && (
+        <div
+          className="upload-error-banner"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+            padding: "10px 14px",
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            borderRadius: 8,
+            color: "#b91c1c",
+            fontSize: 13,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <AlertCircle size={16} />
+            <span>{downloadError}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            style={{ fontSize: 11, padding: "2px 8px", height: 24 }}
+            onClick={() => setDownloadError("")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {downloadSuccess && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 16,
+            padding: "10px 14px",
+            background: "#ecfdf5",
+            border: "1px solid #a7f3d0",
+            borderRadius: 8,
+            color: "#047857",
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          <CheckCircle2 size={16} color="#059669" />
+          <span>{downloadSuccess}</span>
+        </div>
+      )}
 
       {/* 2. Top Summary Metrics Cards (derived from real API summary data) */}
       {summary && (
@@ -209,8 +338,25 @@ export function ReportsPage() {
             </p>
           </div>
 
-          {/* Controls: Category Filter + Purchase Source Selector */}
+          {/* Controls: Tax Period + Category Filter + Purchase Source Selector */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {/* Tax Period Selector */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+              <Calendar size={13} color="#64748b" />
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Tax Period:</span>
+              <select
+                id="select-tax-period"
+                className="filter-select"
+                style={{ height: 28, fontSize: 12, padding: "2px 8px", width: 140 }}
+                value={taxPeriod}
+                onChange={(e) => setTaxPeriod(e.target.value)}
+              >
+                <option value="2026-07">2026-07 (July)</option>
+                <option value="2026-08">2026-08 (August)</option>
+                <option value="">All Tax Periods</option>
+              </select>
+            </div>
+
             {/* Purchase source toggle for purchase schedules */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
               <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>Inward Source:</span>
@@ -224,6 +370,7 @@ export function ReportsPage() {
                 }}
               >
                 <button
+                  id="btn-source-gstr2a"
                   type="button"
                   className={`btn btn-sm ${purchaseSource === "gstr2a" ? "btn-primary" : "btn-secondary"}`}
                   style={{
@@ -233,14 +380,12 @@ export function ReportsPage() {
                     borderRadius: 4,
                     fontWeight: purchaseSource === "gstr2a" ? 700 : 500,
                   }}
-                  onClick={() => {
-                    setLoading(true);
-                    setPurchaseSource("gstr2a");
-                  }}
+                  onClick={() => setPurchaseSource("gstr2a")}
                 >
                   GSTR-2A
                 </button>
                 <button
+                  id="btn-source-gstr2b"
                   type="button"
                   className={`btn btn-sm ${purchaseSource === "gstr2b" ? "btn-primary" : "btn-secondary"}`}
                   style={{
@@ -250,10 +395,7 @@ export function ReportsPage() {
                     borderRadius: 4,
                     fontWeight: purchaseSource === "gstr2b" ? 700 : 500,
                   }}
-                  onClick={() => {
-                    setLoading(true);
-                    setPurchaseSource("gstr2b");
-                  }}
+                  onClick={() => setPurchaseSource("gstr2b")}
                 >
                   GSTR-2B
                 </button>
@@ -263,6 +405,7 @@ export function ReportsPage() {
             {/* Filter Tabs */}
             <div style={{ display: "flex", gap: 4 }}>
               <button
+                id="btn-filter-all"
                 type="button"
                 className={`btn btn-sm ${categoryFilter === "all" ? "btn-primary" : "btn-secondary"}`}
                 style={{ fontSize: 12, height: 28, padding: "0 10px" }}
@@ -271,6 +414,7 @@ export function ReportsPage() {
                 All (12)
               </button>
               <button
+                id="btn-filter-sales"
                 type="button"
                 className={`btn btn-sm ${categoryFilter === "sales" ? "btn-primary" : "btn-secondary"}`}
                 style={{ fontSize: 12, height: 28, padding: "0 10px" }}
@@ -279,6 +423,7 @@ export function ReportsPage() {
                 Sales / GSTR-1 (6)
               </button>
               <button
+                id="btn-filter-purchases"
                 type="button"
                 className={`btn btn-sm ${categoryFilter === "purchases" ? "btn-primary" : "btn-secondary"}`}
                 style={{ fontSize: 12, height: 28, padding: "0 10px" }}
@@ -309,12 +454,23 @@ export function ReportsPage() {
 
               <div className="report-item-right">
                 <button
+                  id={`btn-download-${rep.id}`}
                   type="button"
                   className="btn btn-secondary report-download-btn"
-                  onClick={() => handleExport(rep.id)}
+                  disabled={downloadingId !== null}
+                  onClick={() => handleExport(rep.id, rep.title)}
                 >
-                  <Download size={14} />
-                  <span>Download CSV</span>
+                  {downloadingId === rep.id ? (
+                    <>
+                      <RotateCw size={14} className="animate-spin" />
+                      <span>Exporting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} />
+                      <span>Download CSV</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -324,3 +480,6 @@ export function ReportsPage() {
     </div>
   );
 }
+
+export default ReportsPage;
+

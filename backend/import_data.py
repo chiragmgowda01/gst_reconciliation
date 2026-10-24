@@ -31,11 +31,17 @@ def ensure_business(session, gstin: str, business_name: str | None = None) -> Bu
     return business
 
 
+from services.validation import normalize_invoice_dataframe, parse_date_safely
+
+
 def import_csv_file(file_name: str, source: str, business_id: int | None = None) -> int:
     session = SessionLocal()
     try:
         file_path = DATA / file_name
-        df = pd.read_csv(file_path)
+        if not file_path.exists():
+            return 0
+        df = pd.read_csv(file_path, encoding="utf-8-sig")
+        df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
 
         if df.empty:
             return 0
@@ -49,13 +55,26 @@ def import_csv_file(file_name: str, source: str, business_id: int | None = None)
         else:
             target_business_id = business_id
 
+        norm_df, missing = normalize_invoice_dataframe(df, source)
+        if missing:
+            # Fall back to original df if custom columns
+            norm_df = df
+
         imported = 0
-        for _, row in df.iterrows():
-            invoice_no = str(row["invoice_no"]).strip()
-            invoice_date = pd.to_datetime(row["invoice_date"]).date()
-            gstin = str(row.get("customer_gstin") or row.get("supplier_gstin") or row.get("gstin") or "").strip()
-            taxable_value = float(row["taxable_value"])
-            gst_amount = float(row["gst_amount"])
+        for _, row in norm_df.iterrows():
+            invoice_no = str(row.get("invoice_no") or "").strip()
+            if not invoice_no or invoice_no.lower() == "nan":
+                continue
+            inv_date = parse_date_safely(row.get("invoice_date"))
+            if not inv_date:
+                continue
+
+            gstin = str(row.get("gstin") or row.get("customer_gstin") or row.get("supplier_gstin") or "").strip()
+            try:
+                taxable_value = float(row["taxable_value"])
+                gst_amount = float(row["gst_amount"])
+            except (ValueError, KeyError, TypeError):
+                continue
 
             existing = session.scalar(
                 select(Invoice).where(
@@ -69,14 +88,14 @@ def import_csv_file(file_name: str, source: str, business_id: int | None = None)
 
             invoice = Invoice(
                 invoice_no=invoice_no,
-                invoice_date=invoice_date,
+                invoice_date=inv_date,
                 gstin=gstin,
                 taxable_value=taxable_value,
                 gst_amount=gst_amount,
                 source=source,
                 business_id=target_business_id,
             )
-            
+
             session.add(invoice)
             imported += 1
 

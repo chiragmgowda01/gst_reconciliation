@@ -6,10 +6,19 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from pathlib import Path
 from database import get_db
 from models.models import Business, Invoice
 from services.auth import get_current_business
-from services.validation import validate_invoice_row
+from services.validation import (
+    normalize_gstr3b_dataframe,
+    normalize_invoice_dataframe,
+    parse_date_safely,
+    validate_gstr3b_row,
+    validate_invoice_row,
+)
+
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
@@ -97,85 +106,210 @@ def get_invoice(
 @router.post("/upload")
 async def upload_csv(
     file: UploadFile = File(...),
-    source_type: str = Form(..., description="sales_register, gstr1, purchase_register, gstr2a, or gstr2b"),
+    source_type: str = Form(..., description="sales_register, gstr1, purchase_register, gstr2a, gstr2b, or gstr3b"),
     current_business: Business = Depends(get_current_business),
     db: Session = Depends(get_db),
 ):
-    valid_sources = {"sales_register", "gstr1", "purchase_register", "gstr2a", "gstr2b"}
-    if source_type not in valid_sources:
+    valid_sources = {"sales_register", "gstr1", "purchase_register", "gstr2a", "gstr2b", "gstr3b"}
+    norm_source = source_type.strip().lower()
+    if norm_source not in valid_sources:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid source_type. Must be one of {sorted(list(valid_sources))}",
+            detail=f"Invalid source_type '{source_type}'. Must be one of {sorted(list(valid_sources))}",
         )
 
-    if not file.filename.endswith(".csv"):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only CSV files are supported for upload",
+            detail="Only CSV files (.csv) are supported for upload",
         )
 
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = content.decode("latin-1", errors="replace")
+        df = pd.read_csv(io.StringIO(text))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to parse CSV file: {str(e)}",
         )
 
+    # Strip any stray BOM or leading/trailing whitespace from column names
+    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+
     if df.empty:
         return {
             "file_name": file.filename,
+            "source_type": norm_source,
+            "business_id": current_business.id,
             "total_records": 0,
             "imported": 0,
             "duplicates": 0,
             "invalid_records": 0,
+            "rejected": 0,
+            "validation_findings": 0,
             "errors": [],
             "message": "CSV file was empty. No records imported.",
         }
 
-    total_records = len(df)
+    # ── GSTR-3B Summary Data Handling (Treated as monthly summary level, not invoice level) ──
+    if norm_source == "gstr3b":
+        norm_df, missing_cols = normalize_gstr3b_dataframe(df)
+        if missing_cols:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"GSTR-3B upload validation error: {' | '.join(missing_cols)}",
+            )
+
+        total_records = len(norm_df)
+        imported = 0
+        duplicates = 0
+        rejected = 0
+        validation_errors: List[str] = []
+
+        # Load existing summary file if available
+        gstr3b_path = DATA_DIR / "gstr3b.csv"
+        existing_df = pd.DataFrame()
+        if gstr3b_path.exists():
+            try:
+                existing_df = pd.read_csv(gstr3b_path, encoding="utf-8-sig")
+            except Exception:
+                existing_df = pd.DataFrame()
+
+        rows_to_save = existing_df.to_dict("records") if not existing_df.empty else []
+
+        for idx, row in norm_df.iterrows():
+            row_dict = row.to_dict()
+            is_valid, errs = validate_gstr3b_row(row_dict, idx + 1)
+            if not is_valid:
+                rejected += 1
+                validation_errors.extend(errs)
+                continue
+
+            period = str(row_dict["tax_period"]).strip()
+            out_tax = float(row_dict["output_tax"])
+            el_itc = float(row_dict["eligible_itc"])
+            itc_rev = float(row_dict.get("itc_reversed", 0.0) or 0.0)
+            net_itc = float(row_dict.get("net_itc", el_itc - itc_rev))
+
+            # Check if this exact tax_period already exists
+            match_idx = None
+            is_exact_dup = False
+            for i, existing_row in enumerate(rows_to_save):
+                if str(existing_row.get("tax_period")).strip() == period:
+                    match_idx = i
+                    if (
+                        float(existing_row.get("output_tax", 0)) == out_tax
+                        and float(existing_row.get("eligible_itc", 0)) == el_itc
+                        and float(existing_row.get("itc_reversed", 0)) == itc_rev
+                        and float(existing_row.get("net_itc", 0)) == net_itc
+                    ):
+                        is_exact_dup = True
+                    break
+
+            if is_exact_dup:
+                duplicates += 1
+                continue
+
+            summary_item = {
+                "tax_period": period,
+                "output_tax": out_tax,
+                "eligible_itc": el_itc,
+                "itc_reversed": itc_rev,
+                "net_itc": net_itc,
+            }
+
+            if match_idx is not None:
+                rows_to_save[match_idx] = summary_item
+            else:
+                rows_to_save.append(summary_item)
+
+            imported += 1
+
+        if imported > 0:
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(rows_to_save).to_csv(gstr3b_path, index=False)
+            except Exception as write_err:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to persist GSTR-3B summary records: {str(write_err)}",
+                )
+
+        return {
+            "file_name": file.filename,
+            "source_type": "gstr3b",
+            "business_id": current_business.id,
+            "total_records": total_records,
+            "imported": imported,
+            "duplicates": duplicates,
+            "invalid_records": rejected,
+            "rejected": rejected,
+            "validation_findings": len(validation_errors),
+            "errors": validation_errors[:50],
+            "message": f"Processed {total_records} GSTR-3B period(s): {imported} imported/updated, {duplicates} duplicates, {rejected} rejected ({len(validation_errors)} findings).",
+        }
+
+    # ── Invoice Register Handling (sales_register, gstr1, purchase_register, gstr2a, gstr2b) ──
+    norm_df, missing_cols = normalize_invoice_dataframe(df, norm_source)
+    if missing_cols:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSV schema validation error: {' | '.join(missing_cols)}",
+        )
+
+    total_records = len(norm_df)
     imported = 0
     duplicates = 0
+    rejected = 0
     validation_errors: List[str] = []
+    seen_in_batch = set()
 
-    for idx, row in df.iterrows():
+    for idx, row in norm_df.iterrows():
         row_dict = row.to_dict()
         is_valid, errs = validate_invoice_row(row_dict, idx + 1)
         if not is_valid:
+            rejected += 1
             validation_errors.extend(errs)
             continue
 
         invoice_no = str(row_dict["invoice_no"]).strip()
-        gstin = str(row_dict.get("customer_gstin") or row_dict.get("supplier_gstin") or row_dict.get("gstin") or "").strip()
+        gstin = str(row_dict.get("gstin") or "").strip().upper()
 
-        # Parse date safely
-        date_raw = str(row_dict["invoice_date"]).strip()
-        inv_date = None
-        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
-            try:
-                inv_date = datetime.strptime(date_raw, fmt).date()
-                break
-            except ValueError:
-                continue
-
+        inv_date = parse_date_safely(row_dict["invoice_date"])
         if not inv_date:
-            validation_errors.append(f"Row {idx + 1}: Unrecognized date format '{date_raw}'")
+            rejected += 1
+            validation_errors.append(f"Row {idx + 1}: Unrecognized date format '{row_dict['invoice_date']}'")
             continue
 
-        taxable_value = float(row_dict["taxable_value"])
-        gst_amount = float(row_dict["gst_amount"])
+        try:
+            taxable_value = float(row_dict["taxable_value"])
+            gst_amount = float(row_dict["gst_amount"])
+        except (ValueError, TypeError):
+            rejected += 1
+            validation_errors.append(f"Row {idx + 1}: Invalid numeric taxable_value or gst_amount")
+            continue
 
-        # Check existing duplicate for this business
+        # Intra-batch duplicate check
+        batch_key = (invoice_no, norm_source)
+        if batch_key in seen_in_batch:
+            duplicates += 1
+            continue
+
+        # Database duplicate check for active business
         existing = db.scalar(
             select(Invoice).where(
                 Invoice.invoice_no == invoice_no,
                 Invoice.business_id == current_business.id,
-                Invoice.source == source_type,
+                Invoice.source == norm_source,
             )
         )
         if existing:
             duplicates += 1
+            seen_in_batch.add(batch_key)
             continue
 
         invoice = Invoice(
@@ -184,22 +318,26 @@ async def upload_csv(
             gstin=gstin,
             taxable_value=taxable_value,
             gst_amount=gst_amount,
-            source=source_type,
+            source=norm_source,
             business_id=current_business.id,
         )
         db.add(invoice)
+        seen_in_batch.add(batch_key)
         imported += 1
 
     db.commit()
 
     return {
         "file_name": file.filename,
-        "source_type": source_type,
+        "source_type": norm_source,
         "business_id": current_business.id,
         "total_records": total_records,
         "imported": imported,
         "duplicates": duplicates,
-        "invalid_records": len(validation_errors),
-        "errors": validation_errors[:20],  # Cap preview errors
-        "message": f"Processed {total_records} records: {imported} imported, {duplicates} duplicates, {len(validation_errors)} invalid.",
+        "invalid_records": rejected,
+        "rejected": rejected,
+        "validation_findings": len(validation_errors),
+        "errors": validation_errors[:50],  # Cap preview errors
+        "message": f"Processed {total_records} records: {imported} imported, {duplicates} duplicates, {rejected} rejected ({len(validation_errors)} findings).",
     }
+

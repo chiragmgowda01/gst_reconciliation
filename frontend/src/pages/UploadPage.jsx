@@ -32,20 +32,20 @@ export function UploadPage({ onUploadSuccess }) {
     {
       id: "gstr2a",
       title: "Form GSTR-2A",
-      code: "Dynamic ITC",
-      desc: "Continuous counterparty supplier filings reflecting in portal ITC register",
+      code: "Dynamic Filing",
+      desc: "Imported counterparty supplier filings reflecting in portal ITC register (Local demo statement — not a live API sync)",
     },
     {
       id: "gstr2b",
       title: "Form GSTR-2B",
       code: "Static Auto-Drafted ITC",
-      desc: "Monthly static auto-drafted ITC statement for return filing under Rule 36(4)",
+      desc: "Monthly static auto-drafted ITC statement for return filing under Rule 36(4) (Local demo statement)",
     },
     {
       id: "gstr3b",
       title: "Form GSTR-3B",
-      code: "Summary Return",
-      desc: "Self-assessed monthly return summary of tax liability & ITC",
+      code: "Monthly Summary",
+      desc: "Self-assessed monthly summary return of tax liability & ITC (Treated as period-level summary, not invoice-level)",
     },
   ];
 
@@ -62,12 +62,12 @@ export function UploadPage({ onUploadSuccess }) {
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      if (file.name.endsWith(".csv")) {
+      if (file.name.toLowerCase().endsWith(".csv")) {
         setSelectedFile(file);
         setResult(null);
         setError("");
       } else {
-        setError("Only standard comma-separated CSV files are supported.");
+        setError("Only standard comma-separated CSV files (.csv) are supported.");
       }
     }
   };
@@ -101,12 +101,12 @@ export function UploadPage({ onUploadSuccess }) {
         <div>
           <h2 className="section-title">CSV Ledger Ingestion & Validation</h2>
           <p className="section-subtitle">
-            Upload internal registers and portal return exports to synchronize your PostgreSQL database
+            Upload internal registers, supplier filing statements, and monthly summary returns to synchronize your database
           </p>
         </div>
         <div className="section-badge">
           <ShieldCheck size={13} />
-          <span>PostgreSQL Active Tenant Storage</span>
+          <span>Active Tenant Storage (Local Mode)</span>
         </div>
       </div>
 
@@ -122,6 +122,7 @@ export function UploadPage({ onUploadSuccess }) {
               {targets.map((tgt) => (
                 <div
                   key={tgt.id}
+                  id={`target-card-${tgt.id}`}
                   className={`target-register-card ${sourceType === tgt.id ? "active" : ""}`}
                   onClick={() => {
                     setSourceType(tgt.id);
@@ -181,7 +182,15 @@ export function UploadPage({ onUploadSuccess }) {
               ) : (
                 <div className="dropzone-placeholder">
                   <h4>Click to browse or drag and drop your CSV file</h4>
-                  <p>Accepts UTF-8 encoded CSV files. Standard headers: invoice_no, invoice_date, customer/supplier_gstin, taxable_value, gst_amount</p>
+                  {sourceType === "gstr3b" ? (
+                    <p>
+                      <strong>GSTR-3B Monthly Summary:</strong> Required columns: <code>tax_period</code> (YYYY-MM), <code>output_tax</code>, <code>eligible_itc</code>. Optional: <code>itc_reversed</code>, <code>net_itc</code>. Treated as period summary, not invoice records.
+                    </p>
+                  ) : (
+                    <p>
+                      Accepts UTF-8 encoded CSV files. Standard columns: <code>invoice_no</code>, <code>invoice_date</code>, <code>customer_gstin / supplier_gstin</code>, <code>taxable_value</code>, <code>gst_amount</code> (Safe aliases supported: <code>invoice_number</code>, <code>date</code>, <code>counterparty_gstin</code>, <code>taxable_amount</code>, <code>tax_amount</code>).
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -196,6 +205,7 @@ export function UploadPage({ onUploadSuccess }) {
 
           <div className="upload-actions-bar">
             <button
+              id="btn-upload-submit"
               type="submit"
               className="btn btn-primary"
               disabled={!selectedFile || uploading}
@@ -221,6 +231,23 @@ export function UploadPage({ onUploadSuccess }) {
               <h4>Validation & Ingestion Report</h4>
             </div>
 
+            {result.message && (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: 6,
+                  color: "#166534",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  marginBottom: 14,
+                }}
+              >
+                {result.message}
+              </div>
+            )}
+
             <div className="results-grid">
               <div className="result-kpi-box">
                 <div className="res-label">Total Records Evaluated</div>
@@ -235,14 +262,22 @@ export function UploadPage({ onUploadSuccess }) {
                 <div className="res-value text-amber">{result.duplicates}</div>
               </div>
               <div className="result-kpi-box box-error">
-                <div className="res-label">Invalid Format / Schema</div>
-                <div className="res-value text-red">{result.invalid_records}</div>
+                <div className="res-label">Rejected Records (Rows)</div>
+                <div className="res-value text-red">{result.rejected ?? result.invalid_records}</div>
+              </div>
+              <div className="result-kpi-box">
+                <div className="res-label">Validation Findings</div>
+                <div className="res-value" style={{ color: (result.validation_findings ?? 0) > 0 ? "#b91c1c" : "#059669" }}>
+                  {result.validation_findings ?? (result.errors ? result.errors.length : 0)}
+                </div>
               </div>
             </div>
 
             {result.errors && result.errors.length > 0 && (
               <div className="results-errors-list">
-                <h5>Validation Discrepancies Flagged:</h5>
+                <h5>
+                  Validation Discrepancies Flagged ({result.validation_findings ?? result.errors.length} findings across {result.rejected ?? result.invalid_records} rejected row{(result.rejected ?? result.invalid_records) === 1 ? "" : "s"}):
+                </h5>
                 <div className="errors-scroll-container">
                   {result.errors.map((err, i) => (
                     <div key={i} className="error-item">
@@ -258,3 +293,4 @@ export function UploadPage({ onUploadSuccess }) {
     </div>
   );
 }
+

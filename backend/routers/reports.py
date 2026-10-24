@@ -12,7 +12,7 @@ from database import get_db
 from models.models import Business, Invoice
 from reconciliation.reconcile import reconcile
 from services.anomaly_service import get_all_anomalies
-from services.auth import get_current_business
+from services.auth import get_business_with_fallback, get_current_business
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -28,17 +28,27 @@ def get_business_reconciled_dfs(
         norm_ps = "gstr2a"
 
     start_date, end_date = None, None
-    if tax_period:
+    if tax_period and tax_period.strip():
         period_str = tax_period.strip()
         m = re.match(r"^(\d{4})-(0[1-9]|1[0-2])$", period_str)
-        if m:
-            year, month = int(m.group(1)), int(m.group(2))
-            _, last_day = calendar.monthrange(year, month)
-            start_date = date(year, month, 1)
-            end_date = date(year, month, last_day)
+        if not m:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid tax_period format '{tax_period}'. Expected YYYY-MM with month 01-12 (e.g. 2026-07).",
+            )
+        year, month = int(m.group(1)), int(m.group(2))
+        _, last_day = calendar.monthrange(year, month)
+        start_date = date(year, month, 1)
+        end_date = date(year, month, last_day)
 
     invoices = []
+    has_db_records = False
     try:
+        # Check if tenant has any invoices loaded at all
+        has_db_records = db.scalar(
+            select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
+        ) is not None
+
         query = select(Invoice).where(Invoice.business_id == current_business.id)
         if start_date and end_date:
             query = query.where(Invoice.invoice_date >= start_date, Invoice.invoice_date <= end_date)
@@ -83,11 +93,30 @@ def get_business_reconciled_dfs(
         )
         return sales_df, purchase_df
 
+    # If the business has DB records but none matched the tax period filter: return empty DataFrames
+    if has_db_records:
+        empty_res = pd.DataFrame(columns=cols + [
+            "status", "expected_taxable_value", "actual_taxable_value",
+            "expected_gst_amount", "actual_gst_amount",
+            "taxable_value_diff", "gst_amount_diff", "explanation", "reason"
+        ])
+        return empty_res, empty_res.copy()
+
     # Demo fallback ONLY for default tenant (business_id == 1) if no records uploaded yet
     if current_business.id == 1:
         sales_df = reconcile("sales_register.csv", "gstr1.csv")
         purchase_file = "gstr2b.csv" if norm_ps == "gstr2b" else "gstr2a.csv"
         purchase_df = reconcile("purchase_register.csv", purchase_file)
+
+        # Filter demo data by tax period if requested
+        if start_date and end_date:
+            if not sales_df.empty and "invoice_date" in sales_df.columns:
+                dt_s = pd.to_datetime(sales_df["invoice_date"], errors="coerce").dt.date
+                sales_df = sales_df[(dt_s >= start_date) & (dt_s <= end_date)]
+            if not purchase_df.empty and "invoice_date" in purchase_df.columns:
+                dt_p = pd.to_datetime(purchase_df["invoice_date"], errors="coerce").dt.date
+                purchase_df = purchase_df[(dt_p >= start_date) & (dt_p <= end_date)]
+
         return sales_df, purchase_df
 
     # Any other business with 0 records in DB returns empty DataFrames (strictly tenant-isolated)
@@ -109,6 +138,10 @@ def get_reports_summary(
     norm_ps = purchase_source.strip().lower() if purchase_source else "gstr2a"
     if norm_ps not in {"gstr2a", "gstr2b"}:
         norm_ps = "gstr2a"
+
+    has_db_records = db.scalar(
+        select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
+    ) is not None
 
     sales_df, purchase_df = get_business_reconciled_dfs(
         current_business, db, purchase_source=norm_ps, tax_period=tax_period
@@ -146,11 +179,16 @@ def get_reports_summary(
     total_combined = sales_stats["total_records"] + purchase_stats["total_records"]
     matched_combined = sales_stats["matched"] + purchase_stats["matched"]
 
+    data_source_mode = "LOCAL_DATABASE" if has_db_records else ("DEMO_SYNTHETIC" if current_business.id == 1 else "EMPTY_TENANT")
+
     return {
         "business_id": current_business.id,
         "business_name": current_business.name,
         "purchase_source": norm_ps,
         "tax_period": tax_period or "2026-07",
+        "data_source_mode": data_source_mode,
+        "is_synthetic_demo": data_source_mode == "DEMO_SYNTHETIC",
+        "live_portal_sync": False,
         "sales_summary": sales_stats,
         "purchase_summary": purchase_stats,
         "anomalies_summary": {
@@ -168,7 +206,7 @@ def export_report_csv(
     report_type: str = Query("sales", description="Target report catalogue ID"),
     purchase_source: str = Query("gstr2a", description="gstr2a or gstr2b for purchase reports"),
     tax_period: Optional[str] = Query(None, description="Optional YYYY-MM period"),
-    current_business: Business = Depends(get_current_business),
+    current_business: Business = Depends(get_business_with_fallback),
     db: Session = Depends(get_db),
 ):
     norm_ps = purchase_source.strip().lower() if purchase_source else "gstr2a"
@@ -181,30 +219,31 @@ def export_report_csv(
 
     output = io.StringIO()
     rt = report_type.strip().lower()
+    period_suffix = f"_{tax_period.strip().replace('-', '_')}" if tax_period and tax_period.strip() else ""
 
     # ── 12-Item Report Catalogue ──
     # Group A: 6 Sales / Outward Supplies Reports
     if rt in {"sales", "sales_reconciliation", "sales_full"}:
-        filename = "gst_sales_reconciliation_register.csv"
+        filename = f"gst_sales_reconciliation_register{period_suffix}.csv"
         sales_df.to_csv(output, index=False)
     elif rt in {"sales_matched"}:
-        filename = "gst_sales_matched_schedule.csv"
+        filename = f"gst_sales_matched_schedule{period_suffix}.csv"
         matched_df = sales_df[sales_df["status"] == "MATCH"] if not sales_df.empty else sales_df
         matched_df.to_csv(output, index=False)
     elif rt in {"sales_mismatches", "sales_variance"}:
-        filename = "gst_sales_tax_discrepancies.csv"
+        filename = f"gst_sales_tax_discrepancies{period_suffix}.csv"
         mismatched_df = sales_df[sales_df["status"] == "MISMATCH"] if not sales_df.empty else sales_df
         mismatched_df.to_csv(output, index=False)
     elif rt in {"sales_missing", "sales_unfiled"}:
-        filename = "gst_sales_missing_in_gstr1.csv"
+        filename = f"gst_sales_missing_in_gstr1{period_suffix}.csv"
         missing_df = sales_df[sales_df["status"] == "MISSING_IN_GST"] if not sales_df.empty else sales_df
         missing_df.to_csv(output, index=False)
     elif rt in {"sales_extra", "sales_portal_extra"}:
-        filename = "gst_sales_extra_on_portal.csv"
+        filename = f"gst_sales_extra_on_portal{period_suffix}.csv"
         extra_df = sales_df[sales_df["status"] == "EXTRA_IN_GST"] if not sales_df.empty else sales_df
         extra_df.to_csv(output, index=False)
     elif rt in {"sales_tax_liability", "sales_liability_schedule"}:
-        filename = "gst_outward_tax_liability_variance.csv"
+        filename = f"gst_outward_tax_liability_variance{period_suffix}.csv"
         cols_liability = [c for c in ["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount",
                                      "expected_gst_amount", "actual_gst_amount", "gst_amount_diff", "status", "explanation"]
                          if c in sales_df.columns]
@@ -213,26 +252,26 @@ def export_report_csv(
 
     # Group B: 6 Purchase / Inward ITC Reports (supports GSTR-2A and GSTR-2B)
     elif rt in {"purchases", "purchase_reconciliation", "purchase_full"}:
-        filename = f"gst_purchase_{norm_ps}_reconciliation_register.csv"
+        filename = f"gst_purchase_{norm_ps}_reconciliation_register{period_suffix}.csv"
         purchase_df.to_csv(output, index=False)
     elif rt in {"purchase_matched"}:
-        filename = f"gst_purchase_{norm_ps}_matched_itc_schedule.csv"
+        filename = f"gst_purchase_{norm_ps}_matched_itc_schedule{period_suffix}.csv"
         matched_df = purchase_df[purchase_df["status"] == "MATCH"] if not purchase_df.empty else purchase_df
         matched_df.to_csv(output, index=False)
     elif rt in {"purchase_mismatches", "purchase_variance"}:
-        filename = f"gst_purchase_{norm_ps}_tax_discrepancies.csv"
+        filename = f"gst_purchase_{norm_ps}_tax_discrepancies{period_suffix}.csv"
         mismatched_df = purchase_df[purchase_df["status"] == "MISMATCH"] if not purchase_df.empty else purchase_df
         mismatched_df.to_csv(output, index=False)
     elif rt in {"purchase_missing", "itc_at_risk"}:
-        filename = f"gst_purchase_{norm_ps}_missing_itc_at_risk.csv"
+        filename = f"gst_purchase_{norm_ps}_missing_itc_at_risk{period_suffix}.csv"
         missing_df = purchase_df[purchase_df["status"] == "MISSING_IN_GST"] if not purchase_df.empty else purchase_df
         missing_df.to_csv(output, index=False)
     elif rt in {"purchase_extra", "unrecorded_purchases"}:
-        filename = f"gst_purchase_{norm_ps}_unbooked_vendor_invoices.csv"
+        filename = f"gst_purchase_{norm_ps}_unbooked_vendor_invoices{period_suffix}.csv"
         extra_df = purchase_df[purchase_df["status"] == "EXTRA_IN_GST"] if not purchase_df.empty else purchase_df
         extra_df.to_csv(output, index=False)
     elif rt in {"itc_eligibility_variance", "itc_schedule"}:
-        filename = f"gst_itc_eligibility_{norm_ps}_statement.csv"
+        filename = f"gst_itc_eligibility_{norm_ps}_statement{period_suffix}.csv"
         cols_itc = [c for c in ["invoice_no", "invoice_date", "gstin", "taxable_value", "gst_amount",
                                 "expected_gst_amount", "actual_gst_amount", "gst_amount_diff", "status", "explanation"]
                     if c in purchase_df.columns]
@@ -241,21 +280,21 @@ def export_report_csv(
 
     # Backward-compatible general schedules
     elif rt == "mismatches":
-        filename = "gst_all_mismatches_report.csv"
+        filename = f"gst_all_mismatches_report{period_suffix}.csv"
         combined = pd.concat([
             sales_df[sales_df["status"] == "MISMATCH"] if not sales_df.empty else pd.DataFrame(),
             purchase_df[purchase_df["status"] == "MISMATCH"] if not purchase_df.empty else pd.DataFrame(),
         ], ignore_index=True)
         combined.to_csv(output, index=False)
     elif rt == "missing":
-        filename = "gst_all_missing_invoices_report.csv"
+        filename = f"gst_all_missing_invoices_report{period_suffix}.csv"
         combined = pd.concat([
             sales_df[sales_df["status"] == "MISSING_IN_GST"] if not sales_df.empty else pd.DataFrame(),
             purchase_df[purchase_df["status"] == "MISSING_IN_GST"] if not purchase_df.empty else pd.DataFrame(),
         ], ignore_index=True)
         combined.to_csv(output, index=False)
     elif rt == "anomalies":
-        filename = "gst_audit_anomalies_exceptions.csv"
+        filename = f"gst_audit_anomalies_exceptions{period_suffix}.csv"
         purchase_label = "GSTR-2B" if norm_ps == "gstr2b" else "GSTR-2A"
         anomalies = get_all_anomalies(
             sales_df=sales_df, purchase_df=purchase_df, purchase_label=purchase_label
@@ -275,6 +314,9 @@ def export_report_csv(
 
     return Response(
         content=output.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
     )

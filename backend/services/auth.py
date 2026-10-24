@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -221,3 +221,83 @@ def get_current_business(
 
     # Default to first business if not explicitly provided
     return user_businesses[0]
+
+
+def get_business_with_fallback(
+    x_business_id: Optional[str] = Header(None, alias="X-Business-ID"),
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
+    token: Optional[str] = Query(None, description="Optional access token query parameter"),
+    biz_id: Optional[str] = Query(None, description="Optional business ID query parameter"),
+    db: Session = Depends(get_db),
+) -> Business:
+    """
+    FastAPI dependency that resolves the authenticated Business context from:
+    1. Standard 'Authorization: Bearer <token>' header + 'X-Business-ID' header.
+    2. Fallback query parameters 'token' and 'biz_id' for direct export/download URLs.
+    Strictly enforces tenant ownership and rejects unauthorized access with 401/403.
+    """
+    raw_token = None
+    if auth and auth.credentials:
+        raw_token = auth.credentials
+    elif token and token.strip():
+        raw_token = token.strip()
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please sign in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = decode_access_token(raw_token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.scalar(select(User).where(User.id == int(user_id)))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account no longer exists.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_businesses = db.scalars(
+        select(Business).where(Business.user_id == user.id)
+    ).all()
+
+    if not user_businesses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No businesses are associated with your account.",
+        )
+
+    target_id_str = x_business_id or biz_id
+    if target_id_str:
+        try:
+            target_id = int(target_id_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid business ID format.",
+            )
+
+        business = db.scalar(
+            select(Business).where(
+                Business.id == target_id,
+                Business.user_id == user.id,
+            )
+        )
+        if not business:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You do not have access to this business.",
+            )
+        return business
+
+    return user_businesses[0]
+
