@@ -4,77 +4,95 @@
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Primary Brand: Warm Saffron & Terracotta */
-  --saffron-50: #fff7ed;
-  --saffron-100: #ffedd5;
-  --saffron-200: #fed7aa;
-  --saffron-500: #f97316;
-  --saffron-600: #ea580c;
-  --saffron-700: #c2410c;
-  --saffron-800: #9a3412;
+  /* Modern Fintech SaaS Primary Palette */
+  --sidebar-navy: #0F172A;       /* Slate 900 */
+  --sidebar-navy-dark: #020617;  /* Slate 950 */
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-text: #F8FAFC;
+  --sidebar-text-muted: #94A3B8;
 
-  /* Unified Warm Dark Palette */
-  --dark-warm: #241a17;
-  --dark-warm-2: #2e211d;
-  --saffron: #f97316;
-  --terracotta: #ea580c;
-  --cream: #fff7ed;
-  --warm-white: #fffbf7;
+  --primary-blue: #2563EB;       /* Blue 600 */
+  --primary-blue-hover: #1D4ED8; /* Blue 700 */
+  --primary-blue-light: #EFF6FF; /* Blue 50 */
+  --primary-blue-border: #BFDBFE;/* Blue 200 */
 
-  /* Warm Dark Charcoal (eliminated cold blue navy) */
-  --navy-800: #2e211d;
-  --navy-900: #241a17;
-  --navy-950: #1c1310;
+  --teal-accent: #0D9488;        /* Teal 600 */
+  --teal-accent-hover: #0F766E;  /* Teal 700 */
+  --teal-light: #F0FDFA;         /* Teal 50 */
+  --teal-border: #99F6E4;        /* Teal 200 */
 
-  /* Neutrals (Slate) */
-  --slate-50: #f8fafc;
-  --slate-100: #f1f5f9;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #94a3b8;
-  --slate-500: #64748b;
-  --slate-600: #475569;
-  --slate-700: #334155;
-  --slate-800: #1e293b;
-  --slate-900: #0f172a;
+  /* Neutral Backgrounds & Cards */
+  --bg-app: #F8FAFC;             /* Slate 50 */
+  --bg-surface: #FFFFFF;         /* Pure White */
+  --bg-subtle: #F1F5F9;          /* Slate 100 */
+  --bg-muted: #E2E8F0;           /* Slate 200 */
 
-  /* Status Colors */
-  --match-bg: #ecfdf5;
-  --match-text: #065f46;
-  --match-border: #a7f3d0;
+  /* Typography Colors */
+  --text-main: #1E293B;          /* Slate 800 */
+  --text-muted: #64748B;         /* Slate 500 */
+  --text-dim: #94A3B8;           /* Slate 400 */
 
-  --mismatch-bg: #fef2f2;
-  --mismatch-text: #991b1b;
-  --mismatch-border: #fecaca;
+  /* Functional Status Colors */
+  --success: #16A34A;            /* Green 600 */
+  --success-bg: #DCFCE7;         /* Green 100 */
+  --success-border: #86EFAC;     /* Green 300 */
+  --success-text: #14532D;       /* Green 900 */
 
-  --missing-bg: #fffbeb;
-  --missing-text: #92400e;
-  --missing-border: #fde68a;
+  --warning: #D97706;            /* Amber 600 */
+  --warning-bg: #FEF3C7;         /* Amber 100 */
+  --warning-border: #FDE68A;     /* Amber 300 */
+  --warning-text: #78350F;       /* Amber 900 */
 
-  --extra-bg: #faf5ff;
-  --extra-text: #6b21a8;
-  --extra-border: #e9d5ff;
+  --error: #DC2626;              /* Red 600 */
+  --error-bg: #FEE2E2;           /* Red 100 */
+  --error-border: #FECACA;       /* Red 300 */
+  --error-text: #7F1D1D;         /* Red 900 */
+
+  --info: #0284C7;               /* Sky 600 */
+  --info-bg: #E0F2FE;            /* Sky 100 */
+  --info-border: #BAE6FD;        /* Sky 200 */
+  --info-text: #0C4A6E;          /* Sky 900 */
+
+  --purple: #7C3AED;             /* Violet 600 */
+  --purple-bg: #F3E8FF;          /* Violet 100 */
+  --purple-border: #DDD6FE;      /* Violet 200 */
+  --purple-text: #4C1D95;        /* Violet 900 */
+
+  /* Legacy Status Compatibility Aliases */
+  --match-bg: var(--success-bg);
+  --match-text: var(--success-text);
+  --match-border: var(--success-border);
+
+  --mismatch-bg: var(--error-bg);
+  --mismatch-text: var(--error-text);
+  --mismatch-border: var(--error-border);
+
+  --missing-bg: var(--warning-bg);
+  --missing-text: var(--warning-text);
+  --missing-border: var(--warning-border);
+
+  --extra-bg: var(--purple-bg);
+  --extra-text: var(--purple-text);
+  --extra-border: var(--purple-border);
 
   /* Border Radii */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
+  --radius-full: 9999px;
 
-  /* Institutional Soft Shadows */
-  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 2px 4px -1px rgba(15, 23, 42, 0.03);
-  --shadow-lg: 0 10px 25px -4px rgba(15, 23, 42, 0.08), 0 4px 8px -2px rgba(15, 23, 42, 0.04);
-  --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
-  --shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.09), 0 2px 6px rgba(15, 23, 42, 0.04);
+  /* Elevation & Shadows */
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-hover: 0 8px 20px -3px rgba(15, 23, 42, 0.09), 0 4px 8px -2px rgba(15, 23, 42, 0.04);
 
-  --bg-app: #f8fafc;
-  --bg-surface: #ffffff;
-  --border-color: #e2e8f0;
-  --border-subtle: #edf2f7;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --text-dim: #94a3b8;
+  --border-color: #E2E8F0;
+  --border-subtle: #F1F5F9;
 }
 
 * {
@@ -99,7 +117,7 @@ body {
   display: flex;
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -108,14 +126,14 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--slate-300);
-  border-radius: 9999px;
+  background: #CBD5E1;
+  border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--slate-400);
+  background: #94A3B8;
 }
 
-/* Utility Animations */
+/* Animations */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -128,7 +146,7 @@ body {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes spin {
@@ -139,4 +157,13 @@ body {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }

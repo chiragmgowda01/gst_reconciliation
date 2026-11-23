@@ -309,6 +309,95 @@ export const api = {
     return { success: true, filename, size: blob.size };
   },
 
+  // GST Simulator Endpoints
+  async getGstStatus() {
+    return request("/gst/status");
+  },
+
+  async verifyGstin(gstin) {
+    return request("/gst/gstin/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gstin: String(gstin || "").trim().toUpperCase() }),
+    });
+  },
+
+  async getGstr1(params = {}) {
+    const taxPeriod = typeof params === "string" ? params : params.tax_period;
+    const counterpartyGstin = typeof params === "object" ? params.counterparty_gstin : arguments[1];
+    const query = new URLSearchParams();
+    if (taxPeriod) query.set("tax_period", taxPeriod);
+    if (counterpartyGstin) query.set("counterparty_gstin", counterpartyGstin);
+    const qs = query.toString();
+    return request(`/gst/gstr1${qs ? `?${qs}` : ""}`);
+  },
+
+  async getGstr2a(params = {}) {
+    const taxPeriod = typeof params === "string" ? params : params.tax_period;
+    const counterpartyGstin = typeof params === "object" ? params.counterparty_gstin : arguments[1];
+    const query = new URLSearchParams();
+    if (taxPeriod) query.set("tax_period", taxPeriod);
+    if (counterpartyGstin) query.set("counterparty_gstin", counterpartyGstin);
+    const qs = query.toString();
+    return request(`/gst/gstr2a${qs ? `?${qs}` : ""}`);
+  },
+
+  async getGstr2b(params = {}) {
+    const taxPeriod = typeof params === "string" ? params : params.tax_period;
+    const counterpartyGstin = typeof params === "object" ? params.counterparty_gstin : arguments[1];
+    const query = new URLSearchParams();
+    if (taxPeriod) query.set("tax_period", taxPeriod);
+    if (counterpartyGstin) query.set("counterparty_gstin", counterpartyGstin);
+    const qs = query.toString();
+    return request(`/gst/gstr2b${qs ? `?${qs}` : ""}`);
+  },
+
+  async getGstr3b(taxPeriod) {
+    const period = typeof taxPeriod === "object" ? taxPeriod.tax_period : taxPeriod;
+    const query = new URLSearchParams();
+    if (period) query.set("tax_period", period);
+    const qs = query.toString();
+    return request(`/gst/gstr3b${qs ? `?${qs}` : ""}`);
+  },
+
+  // Aliases for clear naming
+  async getGstGstr1(params) {
+    return this.getGstr1(params);
+  },
+  async getGstGstr2a(params) {
+    return this.getGstr2a(params);
+  },
+  async getGstGstr2b(params) {
+    return this.getGstr2b(params);
+  },
+  async getGstGstr3b(taxPeriod) {
+    return this.getGstr3b(taxPeriod);
+  },
+
+  async previewGstImport(payload) {
+    return request("/gst/import/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        return_type: payload.return_type,
+        tax_period: payload.tax_period,
+        counterparty_gstin: payload.counterparty_gstin || null,
+      }),
+    });
+  },
+
+  async confirmGstImport(payload) {
+    return request("/gst/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        return_type: payload.return_type,
+        tax_period: payload.tax_period,
+        counterparty_gstin: payload.counterparty_gstin || null,
+      }),
+    });
+  },
+
   getExportUrl(reportType, purchaseSource = "gstr2a", taxPeriod = null) {
     const token = authStorage.getToken() || "";
     const bizId = authStorage.getActiveBusinessId() || "";

@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 # Ensure environment is loaded at startup from candidate locations
 env_candidates = [
@@ -17,11 +19,12 @@ for p in env_candidates:
         load_dotenv(p)
         break
 
-from database import engine
+from database import engine, get_db
 from models import models
 from models.base import Base
 from routers.anomalies import router as anomalies_router
 from routers.auth import router as auth_router
+from routers.gst import router as gst_router
 from routers.gstr3b import router as gstr3b_router
 from routers.invoices import router as invoices_router, upload_csv
 from routers.reconciliation import router as reconciliation_router
@@ -80,6 +83,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(gst_router)
 app.include_router(reconciliation_router)
 app.include_router(gstr3b_router)
 app.include_router(invoices_router)
@@ -127,8 +131,20 @@ def home():
 
 
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "database": "connected",
-    }
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "ok",
+            "database": "connected",
+        }
+    except Exception as exc:
+        logger.error("Health check database failure: %s", type(exc).__name__)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "error",
+                "database": "disconnected",
+                "detail": "Database service is unavailable.",
+            },
+        )

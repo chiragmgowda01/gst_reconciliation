@@ -165,7 +165,7 @@ export function UploadPage({ onUploadSuccess }) {
               />
 
               <div className="dropzone-icon-wrap">
-                <UploadCloud size={32} color="#ea580c" />
+                <UploadCloud size={32} color="#2563eb" />
               </div>
 
               {selectedFile ? (
@@ -227,7 +227,7 @@ export function UploadPage({ onUploadSuccess }) {
         {result && (
           <div className="upload-results-panel">
             <div className="results-header">
-              <FileCheck size={20} color="#059669" />
+              <FileCheck size={20} color="#16a34a" />
               <h4>Validation & Ingestion Report</h4>
             </div>
 
@@ -251,23 +251,23 @@ export function UploadPage({ onUploadSuccess }) {
             <div className="results-grid">
               <div className="result-kpi-box">
                 <div className="res-label">Total Records Evaluated</div>
-                <div className="res-value">{result.total_records}</div>
+                <div className="res-value font-mono">{result.total_records}</div>
               </div>
               <div className="result-kpi-box box-success">
                 <div className="res-label">Imported to Database</div>
-                <div className="res-value text-green">{result.imported}</div>
+                <div className="res-value text-green font-mono">{result.imported}</div>
               </div>
               <div className="result-kpi-box box-warning">
                 <div className="res-label">Duplicate Records Skipped</div>
-                <div className="res-value text-amber">{result.duplicates}</div>
+                <div className="res-value text-amber font-mono">{result.duplicates}</div>
               </div>
               <div className="result-kpi-box box-error">
                 <div className="res-label">Rejected Records (Rows)</div>
-                <div className="res-value text-red">{result.rejected ?? result.invalid_records}</div>
+                <div className="res-value text-red font-mono">{result.rejected ?? result.invalid_records}</div>
               </div>
               <div className="result-kpi-box">
                 <div className="res-label">Validation Findings</div>
-                <div className="res-value" style={{ color: (result.validation_findings ?? 0) > 0 ? "#b91c1c" : "#059669" }}>
+                <div className="res-value font-mono" style={{ color: (result.validation_findings ?? 0) > 0 ? "#dc2626" : "#16a34a" }}>
                   {result.validation_findings ?? (result.errors ? result.errors.length : 0)}
                 </div>
               </div>
@@ -293,4 +293,4 @@ export function UploadPage({ onUploadSuccess }) {
     </div>
   );
 }
-
+export default UploadPage;

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.models import Business, Invoice
+# pyrefly: ignore[missing-import]
 from reconciliation.reconcile import reconcile
 from services.anomaly_service import get_all_anomalies
 from services.auth import get_business_with_fallback, get_current_business
@@ -91,6 +92,14 @@ def get_business_reconciled_dfs(
             pd.DataFrame(purchase_reg) if purchase_reg else pd.DataFrame(columns=cols),
             pd.DataFrame(target_purchase_gst) if target_purchase_gst else pd.DataFrame(columns=cols),
         )
+        if norm_ps == "gstr2b" and not purchase_df.empty:
+            note_gstr2b = (
+                "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
+                "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
+            )
+            missing_mask = purchase_df["status"] == "MISSING_IN_GST"
+            purchase_df.loc[missing_mask, "explanation"] = note_gstr2b
+            purchase_df.loc[missing_mask, "reason"] = note_gstr2b
         return sales_df, purchase_df
 
     # If the business has DB records but none matched the tax period filter: return empty DataFrames
@@ -107,6 +116,15 @@ def get_business_reconciled_dfs(
         sales_df = reconcile("sales_register.csv", "gstr1.csv")
         purchase_file = "gstr2b.csv" if norm_ps == "gstr2b" else "gstr2a.csv"
         purchase_df = reconcile("purchase_register.csv", purchase_file)
+
+        if norm_ps == "gstr2b" and not purchase_df.empty:
+            note_gstr2b = (
+                "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
+                "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
+            )
+            missing_mask = purchase_df["status"] == "MISSING_IN_GST"
+            purchase_df.loc[missing_mask, "explanation"] = note_gstr2b
+            purchase_df.loc[missing_mask, "reason"] = note_gstr2b
 
         # Filter demo data by tax period if requested
         if start_date and end_date:

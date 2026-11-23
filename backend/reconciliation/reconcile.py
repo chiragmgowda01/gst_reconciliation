@@ -1,9 +1,28 @@
 from pathlib import Path
+from typing import Any, Optional
 import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
+
+
+def _safe_float(val: Any) -> float:
+    if val is None or pd.isna(val) or val == "":
+        return 0.0
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _safe_float_or_none(val: Any) -> Optional[float]:
+    if val is None or pd.isna(val) or val == "":
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
 
 
 def _extract_gstin(row) -> str:
@@ -58,10 +77,10 @@ def reconcile(my_source, gst_source):
             a = my_matches.iloc[0]
             b = gst_matches.iloc[0]
 
-            a_tv = float(a["taxable_value"])
-            b_tv = float(b["taxable_value"])
-            a_gst = float(a["gst_amount"])
-            b_gst = float(b["gst_amount"])
+            a_tv = _safe_float(a["taxable_value"])
+            b_tv = _safe_float(b["taxable_value"])
+            a_gst = _safe_float(a["gst_amount"])
+            b_gst = _safe_float(b["gst_amount"])
 
             tv_diff = round(a_tv - b_tv, 2)
             gst_diff = round(a_gst - b_gst, 2)
@@ -114,10 +133,10 @@ def reconcile(my_source, gst_source):
                 a = my_matches.iloc[idx] if idx < n_my else None
                 b = gst_matches.iloc[idx] if idx < n_gst else None
 
-                a_tv = float(a["taxable_value"]) if a is not None else None
-                b_tv = float(b["taxable_value"]) if b is not None else None
-                a_gst = float(a["gst_amount"]) if a is not None else None
-                b_gst = float(b["gst_amount"]) if b is not None else None
+                a_tv = _safe_float_or_none(a["taxable_value"]) if a is not None else None
+                b_tv = _safe_float_or_none(b["taxable_value"]) if b is not None else None
+                a_gst = _safe_float_or_none(a["gst_amount"]) if a is not None else None
+                b_gst = _safe_float_or_none(b["gst_amount"]) if b is not None else None
 
                 tv_diff = round(a_tv - b_tv, 2) if (a_tv is not None and b_tv is not None) else None
                 gst_diff = round(a_gst - b_gst, 2) if (a_gst is not None and b_gst is not None) else None
@@ -153,8 +172,8 @@ def reconcile(my_source, gst_source):
         n_my = len(my_matches)
         for idx in range(n_my):
             a = my_matches.iloc[idx]
-            a_tv = float(a["taxable_value"])
-            a_gst = float(a["gst_amount"])
+            a_tv = _safe_float(a["taxable_value"])
+            a_gst = _safe_float(a["gst_amount"])
             explanation = "Invoice exists in internal register but was not found in GST portal filing."
             if n_my > 1:
                 explanation = f"Duplicate invoice exists in internal register (entry {idx + 1} of {n_my}) and was not found in GST portal filing."
@@ -188,8 +207,8 @@ def reconcile(my_source, gst_source):
         n_gst = len(gst_matches)
         for idx in range(n_gst):
             b = gst_matches.iloc[idx]
-            b_tv = float(b["taxable_value"])
-            b_gst = float(b["gst_amount"])
+            b_tv = _safe_float(b["taxable_value"])
+            b_gst = _safe_float(b["gst_amount"])
             explanation = "Invoice found on GST portal but is missing from internal register."
             if n_gst > 1:
                 explanation = f"Duplicate invoice found on GST portal (entry {idx + 1} of {n_gst}) but is missing from internal register."

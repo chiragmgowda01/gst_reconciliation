@@ -14,11 +14,12 @@ Differences are reported as investigation recommendations, NOT as confirmed erro
 GSTR-2B is not yet available in the dataset; its absence is documented explicitly.
 """
 
-from pathlib import Path
-from typing import Optional
 import calendar
+import os
 import re
 from datetime import date as dt_date
+from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -26,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.models import Business, Invoice
+from models.models import Business, GSTR3BReturn, Invoice
 from services.auth import get_current_business
 
 router = APIRouter(prefix="/gstr3b", tags=["GSTR-3B"])
@@ -68,6 +69,77 @@ def _load_gstr3b_row(tax_period: Optional[str]):
         return None, None
 
 
+DEMO_MSME_GSTIN = "29AAAAA1111A1Z5"
+
+
+def _is_demo_fallback_permitted(business_gstin: Optional[str]) -> bool:
+    """
+    Check if synthetic demo fixture fallback is safely permitted.
+    Requirements:
+    1. Business GSTIN must match the known synthetic demo GSTIN (29AAAAA1111A1Z5). Never check numeric ID.
+    2. In production mode (ENVIRONMENT=production or RENDER is set), fallback is disabled by default.
+       It is only permitted if DEMO_MODE or GST_API_DEMO_MODE is explicitly set to 'true'.
+    """
+    if not business_gstin or business_gstin.strip().upper() != DEMO_MSME_GSTIN:
+        return False
+
+    is_production = (
+        os.getenv("ENVIRONMENT", "").strip().lower() in ("production", "prod")
+        or os.getenv("RENDER") is not None
+    )
+    demo_mode_env = os.getenv("DEMO_MODE", "").strip().lower() in ("true", "1", "yes")
+    gst_demo_mode = os.getenv("GST_API_DEMO_MODE", "").strip().lower() in ("true", "1", "yes")
+
+    if is_production and not (demo_mode_env or gst_demo_mode):
+        return False
+
+    return True
+
+
+def _get_gstr3b_record(
+    business_id: int,
+    business_gstin: Optional[str],
+    db: Session,
+    tax_period: Optional[str],
+):
+    """
+    Load GSTR-3B record for this business tenant.
+    Priority 1: Persistent database table `gstr3b_returns`.
+    Priority 2: Fallback to read-only demo CSV fixture ONLY for verified demo GSTIN and permitted environment.
+    """
+    query = select(GSTR3BReturn).where(GSTR3BReturn.business_id == business_id)
+    if tax_period:
+        query = query.where(GSTR3BReturn.tax_period == tax_period.strip())
+    else:
+        query = query.order_by(GSTR3BReturn.tax_period.desc())
+
+    record = db.scalar(query)
+    if record is not None:
+        return {
+            "tax_period": record.tax_period,
+            "output_tax": record.output_tax,
+            "eligible_itc": record.eligible_itc,
+            "itc_reversed": record.itc_reversed,
+            "net_itc": record.net_itc,
+            "source": "database",
+        }
+
+    # Safe demo fallback check (GSTIN-verified, production-guarded)
+    if _is_demo_fallback_permitted(business_gstin):
+        row, period = _load_gstr3b_row(tax_period)
+        if row is not None:
+            return {
+                "tax_period": str(row["tax_period"]),
+                "output_tax": float(row["output_tax"]),
+                "eligible_itc": float(row["eligible_itc"]),
+                "itc_reversed": float(row["itc_reversed"]),
+                "net_itc": float(row["net_itc"]),
+                "source": "demo_fixture",
+            }
+
+    return None
+
+
 def _get_db_invoice_sums(business_id: int, db: Session, start_date=None, end_date=None):
     """
     Sum taxable_value and gst_amount by source type for the given business.
@@ -100,15 +172,24 @@ def gstr3b_summary(
 ):
     """
     Returns GSTR-3B summary figures for the given tax period.
-    Data is sourced from the GSTR-3B CSV file (represents filed return values).
-    For multi-business setups, only business_id == 1 has sample data; others
-    return zeros to prevent fabricating values for tenants with no GSTR-3B file.
+    Priority 1: Database table `gstr3b_returns`.
+    Priority 2: Fallback to synthetic CSV fixture for demo business (id == 1).
+    Other businesses return data_available=False if no database filing exists.
     """
     resolved_period_str, _, _ = _validate_tax_period(tax_period)
-    row, period = _load_gstr3b_row(resolved_period_str or tax_period)
-    resolved_period = resolved_period_str or period or (tax_period.strip() if tax_period else "2026-07")
+    record = _get_gstr3b_record(
+        current_business.id,
+        current_business.gstin,
+        db,
+        resolved_period_str or tax_period,
+    )
+    resolved_period = (
+        resolved_period_str
+        or (record["tax_period"] if record else None)
+        or (tax_period.strip() if tax_period else "2026-07")
+    )
 
-    if row is None or current_business.id != 1:
+    if record is None:
         # Do not fabricate values for businesses without GSTR-3B data
         return {
             "business_id": current_business.id,
@@ -123,11 +204,11 @@ def gstr3b_summary(
 
     return {
         "business_id": current_business.id,
-        "tax_period": resolved_period,
-        "output_tax": float(row["output_tax"]),
-        "eligible_itc": float(row["eligible_itc"]),
-        "itc_reversed": float(row["itc_reversed"]),
-        "net_itc": float(row["net_itc"]),
+        "tax_period": record["tax_period"],
+        "output_tax": float(record["output_tax"]),
+        "eligible_itc": float(record["eligible_itc"]),
+        "itc_reversed": float(record["itc_reversed"]),
+        "net_itc": float(record["net_itc"]),
         "data_available": True,
     }
 
@@ -151,9 +232,9 @@ def gstr3b_cross_form(
     """
     period_str, start_date, end_date = _validate_tax_period(tax_period)
 
-    # Load GSTR-3B CSV row
-    gstr3b_row, csv_period = _load_gstr3b_row(period_str)
-    resolved_period = period_str or csv_period or "2026-07"
+    # Load GSTR-3B record (DB first, fallback to demo CSV only if safely permitted)
+    record = _get_gstr3b_record(current_business.id, current_business.gstin, db, period_str)
+    resolved_period = period_str or (record["tax_period"] if record else "2026-07")
 
     # Load DB invoice sums for this business
     try:
@@ -178,12 +259,12 @@ def gstr3b_cross_form(
     has_db_data = bool(db_sums)
 
     # GSTR-3B declared values
-    gstr3b_available = (gstr3b_row is not None) and (current_business.id == 1)
+    gstr3b_available = record is not None
     if gstr3b_available:
-        gstr3b_output_tax = float(gstr3b_row["output_tax"])
-        gstr3b_eligible_itc = float(gstr3b_row["eligible_itc"])
-        gstr3b_itc_reversed = float(gstr3b_row["itc_reversed"])
-        gstr3b_net_itc = float(gstr3b_row["net_itc"])
+        gstr3b_output_tax = float(record["output_tax"])
+        gstr3b_eligible_itc = float(record["eligible_itc"])
+        gstr3b_itc_reversed = float(record["itc_reversed"])
+        gstr3b_net_itc = float(record["net_itc"])
     else:
         gstr3b_output_tax = gstr3b_eligible_itc = gstr3b_itc_reversed = gstr3b_net_itc = 0.0
 
@@ -195,9 +276,9 @@ def gstr3b_cross_form(
 
     # ── Cross-form comparison 2: Input tax credit ──
     # GSTR-2A vs GSTR-3B Table 4(A)
-    gstr2a_to_gstr3b_diff = round(gstr2a_gst - gstr3b_eligible_itc, 2)
+    gstr2a_to_gstr3b_diff = round(gstr2a_gst - gstr3b_eligible_itc, 2) if gstr3b_available else None
     # GSTR-2B vs GSTR-3B Table 4(A)
-    gstr2b_to_gstr3b_diff = round(gstr2b_gst - gstr3b_eligible_itc, 2) if has_gstr2b else None
+    gstr2b_to_gstr3b_diff = round(gstr2b_gst - gstr3b_eligible_itc, 2) if (has_gstr2b and gstr3b_available) else None
     # Purchase register vs GSTR-2A
     purchase_to_gstr2a_diff = round(purchase_reg_gst - gstr2a_gst, 2)
     # Purchase register vs GSTR-2B
@@ -470,7 +551,7 @@ def gstr3b_cross_form(
             "purchase_register_vs_gstr2b_gst": purchase_to_gstr2b_diff,
             "gstr2a_vs_gstr2b_gst": gstr2a_to_gstr2b_diff,
             "gstr2a_vs_gstr3b_itc": gstr2a_to_gstr3b_diff if gstr3b_available else None,
-            "gstr2b_vs_gstr3b_itc": gstr2b_to_gstr3b_diff,
+            "gstr2b_vs_gstr3b_itc": gstr2b_to_gstr3b_diff if gstr3b_available else None,
         },
         "findings": findings,
         "total_findings": len(findings),

@@ -1,14 +1,15 @@
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from pathlib import Path
 from database import get_db
-from models.models import Business, Invoice
+from models.models import Business, GSTR3BReturn, Invoice
 from services.auth import get_current_business
 from services.validation import (
     normalize_gstr3b_dataframe,
@@ -170,16 +171,8 @@ async def upload_csv(
         rejected = 0
         validation_errors: List[str] = []
 
-        # Load existing summary file if available
-        gstr3b_path = DATA_DIR / "gstr3b.csv"
-        existing_df = pd.DataFrame()
-        if gstr3b_path.exists():
-            try:
-                existing_df = pd.read_csv(gstr3b_path, encoding="utf-8-sig")
-            except Exception:
-                existing_df = pd.DataFrame()
-
-        rows_to_save = existing_df.to_dict("records") if not existing_df.empty else []
+        # Track tax periods encountered within the current upload batch
+        batch_seen: dict[str, dict] = {}
 
         for idx, row in norm_df.iterrows():
             row_dict = row.to_dict()
@@ -195,49 +188,87 @@ async def upload_csv(
             itc_rev = float(row_dict.get("itc_reversed", 0.0) or 0.0)
             net_itc = float(row_dict.get("net_itc", el_itc - itc_rev))
 
-            # Check if this exact tax_period already exists
-            match_idx = None
-            is_exact_dup = False
-            for i, existing_row in enumerate(rows_to_save):
-                if str(existing_row.get("tax_period")).strip() == period:
-                    match_idx = i
-                    if (
-                        float(existing_row.get("output_tax", 0)) == out_tax
-                        and float(existing_row.get("eligible_itc", 0)) == el_itc
-                        and float(existing_row.get("itc_reversed", 0)) == itc_rev
-                        and float(existing_row.get("net_itc", 0)) == net_itc
-                    ):
-                        is_exact_dup = True
-                    break
+            # 1. Intra-batch duplicate and conflict detection
+            if period in batch_seen:
+                prev = batch_seen[period]
+                if (
+                    round(prev["output_tax"], 2) == round(out_tax, 2)
+                    and round(prev["eligible_itc"], 2) == round(el_itc, 2)
+                    and round(prev["itc_reversed"], 2) == round(itc_rev, 2)
+                    and round(prev["net_itc"], 2) == round(net_itc, 2)
+                ):
+                    duplicates += 1
+                    continue
+                else:
+                    # Conflicting figures for the same tax period inside the batch
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Conflicting GSTR-3B records found in upload for tax period '{period}'. "
+                            f"Row {idx + 1} contradicts an earlier row in the same file. "
+                            f"Each tax period must specify consistent summary figures."
+                        ),
+                    )
 
-            if is_exact_dup:
-                duplicates += 1
-                continue
-
-            summary_item = {
-                "tax_period": period,
+            batch_seen[period] = {
                 "output_tax": out_tax,
                 "eligible_itc": el_itc,
                 "itc_reversed": itc_rev,
                 "net_itc": net_itc,
             }
 
-            if match_idx is not None:
-                rows_to_save[match_idx] = summary_item
-            else:
-                rows_to_save.append(summary_item)
-
-            imported += 1
-
-        if imported > 0:
-            try:
-                DATA_DIR.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame(rows_to_save).to_csv(gstr3b_path, index=False)
-            except Exception as write_err:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to persist GSTR-3B summary records: {str(write_err)}",
+            # 2. Query existing record in database for this business tenant and tax_period
+            existing_record = db.scalar(
+                select(GSTR3BReturn).where(
+                    GSTR3BReturn.business_id == current_business.id,
+                    GSTR3BReturn.tax_period == period,
                 )
+            )
+
+            if existing_record is not None:
+                if (
+                    round(existing_record.output_tax, 2) == round(out_tax, 2)
+                    and round(existing_record.eligible_itc, 2) == round(el_itc, 2)
+                    and round(existing_record.itc_reversed, 2) == round(itc_rev, 2)
+                    and round(existing_record.net_itc, 2) == round(net_itc, 2)
+                ):
+                    duplicates += 1
+                    continue
+                else:
+                    # Update existing record idempotently
+                    existing_record.output_tax = out_tax
+                    existing_record.eligible_itc = el_itc
+                    existing_record.itc_reversed = itc_rev
+                    existing_record.net_itc = net_itc
+                    existing_record.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    imported += 1
+            else:
+                new_record = GSTR3BReturn(
+                    business_id=current_business.id,
+                    tax_period=period,
+                    output_tax=out_tax,
+                    eligible_itc=el_itc,
+                    itc_reversed=itc_rev,
+                    net_itc=net_itc,
+                )
+                db.add(new_record)
+                imported += 1
+
+        try:
+            db.commit()
+        except IntegrityError as integ_err:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A conflicting GSTR-3B return was concurrently modified or inserted for this period. Please refresh and retry.",
+            )
+        except Exception as commit_err:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to persist GSTR-3B records to database. Transaction has been safely rolled back.",
+            )
 
         return {
             "file_name": file.filename,

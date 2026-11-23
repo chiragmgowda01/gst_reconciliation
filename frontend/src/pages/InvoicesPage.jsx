@@ -121,6 +121,8 @@ export function InvoicesPage({ onSelectInvoice }) {
               <option value="gstr1">GSTR-1</option>
               <option value="purchase_register">Purchase Register</option>
               <option value="gstr2a">GSTR-2A</option>
+              <option value="gstr2b">GSTR-2B</option>
+              <option value="gstr3b">GSTR-3B</option>
             </select>
 
             <button type="submit" className="btn btn-secondary btn-sm">

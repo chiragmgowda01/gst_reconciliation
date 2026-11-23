@@ -45,9 +45,9 @@ export function SettingsPage({ activeBusiness }) {
         className="institutional-card"
         style={{
           background: "#ffffff",
-          border: "1px solid #e7e2dc",
-          borderRadius: 18,
-          boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
+          border: "1px solid var(--border-color)",
+          borderRadius: 16,
+          boxShadow: "var(--shadow-sm)",
           padding: "26px 28px",
           marginBottom: 20,
         }}
@@ -58,11 +58,11 @@ export function SettingsPage({ activeBusiness }) {
               width: 38,
               height: 38,
               borderRadius: 10,
-              backgroundColor: "rgba(234, 88, 12, 0.12)",
+              backgroundColor: "#eff6ff",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#ea580c",
+              color: "#2563eb",
             }}
           >
             <Building2 size={20} />
@@ -112,7 +112,7 @@ export function SettingsPage({ activeBusiness }) {
                 fontSize: 13.5,
                 fontWeight: 700,
                 fontFamily: "var(--font-mono)",
-                color: "#c2410c",
+                color: "var(--primary-blue)",
                 letterSpacing: "0.5px",
               }}
             >
@@ -164,14 +164,14 @@ export function SettingsPage({ activeBusiness }) {
         </div>
       </div>
 
-      {/* 3. Reconciliation Rules & Tolerances */}
+      {/* 2. Reconciliation Rules & Tolerances */}
       <div
         className="institutional-card"
         style={{
           background: "#ffffff",
-          border: "1px solid #e7e2dc",
-          borderRadius: 18,
-          boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
+          border: "1px solid var(--border-color)",
+          borderRadius: 16,
+          boxShadow: "var(--shadow-sm)",
           padding: "26px 28px",
         }}
       >
@@ -181,11 +181,11 @@ export function SettingsPage({ activeBusiness }) {
               width: 38,
               height: 38,
               borderRadius: 10,
-              backgroundColor: "rgba(217, 119, 6, 0.12)",
+              backgroundColor: "#f0fdfa",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#d97706",
+              color: "#0d9488",
             }}
           >
             <Sliders size={20} />
@@ -215,7 +215,7 @@ export function SettingsPage({ activeBusiness }) {
                 gap: 8,
               }}
             >
-              <CheckCircle2 size={15} color="#059669" />
+              <CheckCircle2 size={15} color="#16a34a" />
               <span>₹0.00 (Exact invoice matching enforced)</span>
             </div>
           </div>
@@ -238,7 +238,7 @@ export function SettingsPage({ activeBusiness }) {
                 gap: 8,
               }}
             >
-              <ShieldCheck size={15} color="#ea580c" />
+              <ShieldCheck size={15} color="#dc2626" />
               <span>≥ ₹1,000.00 (Escalates to High Severity)</span>
             </div>
           </div>
@@ -247,3 +247,4 @@ export function SettingsPage({ activeBusiness }) {
     </div>
   );
 }
+export default SettingsPage;

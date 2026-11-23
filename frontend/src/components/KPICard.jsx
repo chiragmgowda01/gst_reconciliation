@@ -3,9 +3,9 @@ export function KPICard({
   value,
   icon: Icon,
   subtext,
-  iconBg = "#fff7ed",
-  iconColor = "#ea580c",
-  accentColor,
+  iconBg = "#eff6ff",
+  iconColor = "#2563eb",
+  accentColor = "var(--primary-blue)",
 }) {
   return (
     <div className="kpi-card" style={accentColor ? { borderTop: `3px solid ${accentColor}` } : {}}>
@@ -22,3 +22,4 @@ export function KPICard({
     </div>
   );
 }
+export default KPICard;

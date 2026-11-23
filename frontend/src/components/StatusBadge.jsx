@@ -61,11 +61,12 @@ export function StatusBadge({ status }) {
   if (s === "LOW") {
     return (
       <span className="badge badge-low">
-        <AlertCircle size={12} />
+        <CheckCircle2 size={12} />
         LOW
       </span>
     );
   }
 
-  return <span className="badge badge-low">{status}</span>;
+  return <span className="badge">{status}</span>;
 }
+export default StatusBadge;

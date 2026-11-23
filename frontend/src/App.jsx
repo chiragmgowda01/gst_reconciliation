@@ -18,12 +18,17 @@ import { InvoicesPage } from "./pages/InvoicesPage";
 import { UploadPage } from "./pages/UploadPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { GstApiPage } from "./pages/GstApiPage";
 
 export function App() {
   const [user, setUser] = useState(null);
   const [businesses, setBusinesses] = useState([]);
   const [activeBusiness, setActiveBusiness] = useState(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  // Responsive sidebar states
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [reconciliationData, setReconciliationData] = useState(null);
@@ -179,6 +184,14 @@ export function App() {
     setBusinesses((prev) => [...prev, newBiz]);
   };
 
+  const handleToggleSidebar = () => {
+    if (window.innerWidth <= 768) {
+      setIsMobileMenuOpen((prev) => !prev);
+    } else {
+      setIsSidebarCollapsed((prev) => !prev);
+    }
+  };
+
   if (isAuthChecking) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -194,20 +207,40 @@ export function App() {
   const sales = reconciliationData?.sales || [];
   const purchases = reconciliationData?.purchases || [];
 
+  // Determine if active workspace is using demo / synthetic GST seed data
+  const isSyntheticDemo =
+    !activeBusiness ||
+    activeBusiness.id === 1 ||
+    Boolean(reconciliationData?.summary?.is_synthetic_demo);
+
   return (
     <div className="app-container">
-      {/* Sidebar Navigation */}
+      {/* Mobile Drawer Backdrop */}
+      <div
+        className={`mobile-drawer-overlay ${isMobileMenuOpen ? "active" : ""}`}
+        onClick={() => setIsMobileMenuOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Modern Collapsible Navy Sidebar */}
       <Sidebar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={(tab) => {
+          setCurrentTab(tab);
+          setIsMobileMenuOpen(false);
+        }}
         anomalyCount={anomalies.length}
         user={user}
         activeBusiness={activeBusiness}
         onLogout={handleLogout}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
 
       {/* Main Content Area */}
-      <div className="main-wrapper">
+      <div className={`main-wrapper ${isSidebarCollapsed ? "collapsed-sidebar" : ""}`}>
         <TopBar
           currentTab={currentTab}
           onRefresh={() => loadDashboardData(true)}
@@ -220,6 +253,9 @@ export function App() {
           onSelectBusiness={handleSelectBusiness}
           onBusinessAdded={handleBusinessAdded}
           onLogout={handleLogout}
+          onToggleSidebar={handleToggleSidebar}
+          isSidebarCollapsed={isSidebarCollapsed}
+          isSyntheticDemo={isSyntheticDemo}
         />
 
         <main className="page-content">
@@ -239,6 +275,7 @@ export function App() {
                   onSelectInvoice={setSelectedInvoice}
                   onNavigate={setCurrentTab}
                   activeBusiness={activeBusiness}
+                  isSyntheticDemo={isSyntheticDemo}
                 />
               )}
 
@@ -270,6 +307,15 @@ export function App() {
                 <AnomaliesPage
                   anomalies={anomalies}
                   mlMeta={mlMeta}
+                />
+              )}
+
+              {currentTab === "gst_api" && (
+                <GstApiPage
+                  key={activeBusiness?.id}
+                  activeBusiness={activeBusiness}
+                  onImportSuccess={() => loadDashboardData(true)}
+                  onNavigate={setCurrentTab}
                 />
               )}
 

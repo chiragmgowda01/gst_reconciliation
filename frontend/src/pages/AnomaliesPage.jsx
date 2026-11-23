@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ShieldAlert, AlertTriangle, AlertCircle, HelpCircle, Search, Filter, CheckCircle2, Brain } from "lucide-react";
+import { ShieldAlert, AlertTriangle, AlertCircle, Search, Filter, CheckCircle2, Brain } from "lucide-react";
 import { StatusBadge } from "../components/StatusBadge";
 import { KPICard } from "../components/KPICard";
 
@@ -49,13 +49,13 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
             padding: "10px 16px",
             marginBottom: 16,
             borderRadius: 8,
-            background: mlMeta.ml_available ? "#ecfdf5" : "#f8fafc",
-            border: `1px solid ${mlMeta.ml_available ? "#6ee7b7" : "#e2e8f0"}`,
+            background: mlMeta.ml_available ? "#f0fdfa" : "#f8fafc",
+            border: `1px solid ${mlMeta.ml_available ? "#99f6e4" : "#e2e8f0"}`,
             fontSize: 12.5,
-            color: mlMeta.ml_available ? "#065f46" : "#64748b",
+            color: mlMeta.ml_available ? "#0f766e" : "#64748b",
           }}
         >
-          <Brain size={15} color={mlMeta.ml_available ? "#059669" : "#94a3b8"} />
+          <Brain size={16} color={mlMeta.ml_available ? "#0d9488" : "#94a3b8"} />
           <span>
             <strong>Isolation Forest ML Analysis:</strong>{" "}
             {mlMeta.ml_available
@@ -88,9 +88,9 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
           value={anomalies.length}
           icon={AlertTriangle}
           subtext="Audited exceptions requiring review"
-          iconBg="#fff7ed"
-          iconColor="#ea580c"
-          accentColor="#ea580c"
+          iconBg="#eff6ff"
+          iconColor="#2563eb"
+          accentColor="#2563eb"
         />
         <KPICard
           title="High Priority"
@@ -105,7 +105,7 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
           title="Medium Priority"
           value={mediumCount}
           icon={AlertCircle}
-          subtext="Value differences / unbooked items"
+          subtext="Rate variances & minor gaps"
           iconBg="#fffbeb"
           iconColor="#d97706"
           accentColor="#d97706"
@@ -113,151 +113,130 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
         <KPICard
           title="Low Priority"
           value={lowCount}
-          icon={HelpCircle}
-          subtext="Minor variances & informational"
-          iconBg="#f8fafc"
-          iconColor="#475569"
-          accentColor="#94a3b8"
+          icon={CheckCircle2}
+          subtext="Unusual pattern warnings"
+          iconBg="#f0fdfa"
+          iconColor="#0d9488"
+          accentColor="#0d9488"
         />
       </div>
 
-      {/* 3. Main Anomaly Register */}
-      <div className="institutional-card">
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">Exception Register & Recommended Review Actions</h3>
-            <p className="card-subtitle">
-              Detailed list of flagged records graded by tax risk and recommended accountant resolution
-            </p>
+      {/* 3. Filter Controls */}
+      <div className="institutional-card" style={{ marginBottom: 16, padding: "14px 18px" }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Search */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200 }}>
+            <Search size={15} color="#94a3b8" />
+            <input
+              type="text"
+              placeholder="Filter by invoice no, GSTIN or reason..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                fontSize: 12.5,
+                outline: "none",
+              }}
+            />
           </div>
-          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            Showing <strong>{filtered.length}</strong> of {anomalies.length} items
-          </div>
-        </div>
 
-        {/* Filter Controls Bar */}
-        <div className="filter-bar">
-          <div className="filter-left">
-            <div className="search-input-wrapper">
-              <Search size={14} color="#94a3b8" />
-              <input
-                type="text"
-                className="filter-input-with-icon"
-                placeholder="Search invoice, GSTIN or reason..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="filter-dropdown-wrapper">
-              <Filter size={13} color="#94a3b8" />
-              <select
-                className="filter-select"
-                value={severityFilter}
-                onChange={(e) => setSeverityFilter(e.target.value)}
+          {/* Severity filter */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Filter size={13} color="#64748b" />
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>Severity:</span>
+            {["ALL", "HIGH", "MEDIUM", "LOW"].map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`btn btn-sm ${severityFilter === s ? "btn-primary" : "btn-secondary"}`}
+                style={{ fontSize: 11.5, padding: "3px 10px", height: 28 }}
+                onClick={() => setSeverityFilter(s)}
               >
-                <option value="ALL">All Severities</option>
-                <option value="HIGH">High Severity</option>
-                <option value="MEDIUM">Medium Severity</option>
-                <option value="LOW">Low Severity</option>
-              </select>
-            </div>
+                {s}
+              </button>
+            ))}
+          </div>
 
+          {/* Type filter */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>Type:</span>
             <select
-              className="filter-select"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: "1px solid #e2e8f0",
+                fontSize: 12,
+                backgroundColor: "#fff",
+                outline: "none",
+              }}
             >
-              <option value="ALL">All Exception Types</option>
-              <option value="MISSING_IN_GST">Missing in GST</option>
-              <option value="EXTRA_IN_GST">Extra on Portal</option>
-              <option value="ML_UNUSUAL_PATTERN">ML Unusual Pattern</option>
-              <option value="LARGE_TAX_DIFFERENCE">Tax Discrepancy</option>
-              <option value="MISMATCH">Value Mismatch</option>
+              <option value="ALL">All Rule Categories</option>
+              <option value="VALUE_MISMATCH">Value Mismatch</option>
+              <option value="MISSING_INVOICE">Missing Invoice</option>
+              <option value="RATE_DISCREPANCY">Rate Discrepancy</option>
               <option value="DUPLICATE_INVOICE">Duplicate Invoice</option>
-              <option value="INVALID_GSTIN">Invalid GSTIN</option>
+              <option value="ML_UNUSUAL_PATTERN">ML Unusual Pattern</option>
             </select>
-
-            {(search || severityFilter !== "ALL" || typeFilter !== "ALL") && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  setSearch("");
-                  setSeverityFilter("ALL");
-                  setTypeFilter("ALL");
-                }}
-              >
-                Clear Filters
-              </button>
-            )}
           </div>
         </div>
+      </div>
 
-        {/* Data Table */}
+      {/* 4. Anomalies Table */}
+      <div className="institutional-card">
         <div className="table-wrapper">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Invoice No</th>
-                <th>Date</th>
-                <th>Counterparty GSTIN</th>
-                <th>Source Register</th>
-                <th>Exception Pattern</th>
+                <th>Party GSTIN</th>
+                <th>Register / Source</th>
+                <th style={{ textAlign: "right" }}>Value</th>
+                <th style={{ textAlign: "right" }}>Variance</th>
                 <th>Severity</th>
-                <th style={{ textAlign: "right" }}>Difference</th>
-                <th>Audit Reason & Recommended Review Action</th>
+                <th>Category</th>
+                <th>Diagnostic Explanation</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="empty-state">
-                    <CheckCircle2 size={28} color="#10b981" className="empty-icon" />
-                    <p style={{ fontWeight: 600 }}>No anomalies found matching current criteria.</p>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "32px 16px", color: "#64748b" }}>
+                    No anomalies match the current filter criteria.
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td className="mono-cell" style={{ fontWeight: 600 }}>{item.invoice_no}</td>
-                    <td>{item.date || "—"}</td>
+                filtered.map((item, idx) => (
+                  <tr key={`${item.invoice_no}-${item.type}-${idx}`}>
+                    <td className="mono-cell" style={{ fontWeight: 600 }}>{item.invoice_no || "—"}</td>
                     <td className="mono-cell">{item.gstin || "—"}</td>
-                    <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.source}</td>
-                    <td style={{ fontSize: 12, fontWeight: 600 }}>
+                    <td>{item.source || "Ledger"}</td>
+                    <td style={{ textAlign: "right" }} className="mono-cell">{formatCurrency(item.value)}</td>
+                    <td style={{ textAlign: "right", color: item.variance ? "#dc2626" : "inherit" }} className="mono-cell">
+                      {item.variance ? formatCurrency(item.variance) : "—"}
+                    </td>
+                    <td><StatusBadge status={item.severity} /></td>
+                    <td>
                       <span
-                        className="anomaly-type-tag"
-                        style={item.type === "ML_UNUSUAL_PATTERN" ? { background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" } : {}}
+                        style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          backgroundColor: item.type === "ML_UNUSUAL_PATTERN" ? "#f0fdfa" : "#f1f5f9",
+                          color: item.type === "ML_UNUSUAL_PATTERN" ? "#0f766e" : "#475569",
+                        }}
                       >
-                        {item.type === "ML_UNUSUAL_PATTERN" ? (
-                          <><Brain size={10} style={{ display: "inline", marginRight: 3 }} />ML Pattern</>
-                        ) : (
-                          item.type ? item.type.replace(/_/g, " ") : "Unusual Pattern"
-                        )}
+                        {item.type || "RULE"}
                       </span>
                     </td>
-                    <td>
-                      <StatusBadge status={item.severity} />
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontWeight: 700,
-                        color: item.difference > 0 ? "#dc2626" : "inherit",
-                      }}
-                    >
-                      {formatCurrency(item.difference)}
-                    </td>
-                    <td style={{ maxWidth: 400 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-main)" }}>
-                        {item.explanation}
-                      </div>
-                      {item.action_recommended && (
-                        <div className="recommended-action-pill">
-                          <span>Action:</span> {item.action_recommended}
-                        </div>
-                      )}
+                    <td style={{ fontSize: 12, color: "#475569", maxWidth: 300 }}>
+                      {item.explanation || "Discrepancy detected during rule check."}
                     </td>
                   </tr>
                 ))
@@ -269,3 +248,4 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
     </div>
   );
 }
+export default AnomaliesPage;

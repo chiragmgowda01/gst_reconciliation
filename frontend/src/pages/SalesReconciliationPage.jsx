@@ -39,8 +39,8 @@ export function SalesReconciliationPage({ sales = [], onSelectInvoice }) {
           icon={CheckCircle2}
           subtext="Properly filed in GSTR-1"
           iconBg="#ecfdf5"
-          iconColor="#059669"
-          accentColor="#059669"
+          iconColor="#16a34a"
+          accentColor="#16a34a"
         />
         <KPICard
           title="Value Mismatches"

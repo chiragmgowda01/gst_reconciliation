@@ -1,4 +1,4 @@
-import { Search, RotateCw, Bell, LogOut } from "lucide-react";
+import { Search, RotateCw, Bell, LogOut, Menu } from "lucide-react";
 import { BusinessSwitcher } from "./BusinessSwitcher";
 
 export function TopBar({
@@ -13,6 +13,8 @@ export function TopBar({
   onSelectBusiness,
   onBusinessAdded,
   onLogout,
+  onToggleSidebar,
+  isSyntheticDemo = true,
 }) {
   const titles = {
     dashboard: {
@@ -25,7 +27,7 @@ export function TopBar({
     },
     purchase: {
       title: "Purchase & ITC Reconciliation",
-      subtitle: "Purchase Register ↔ GSTR-2A supplier filings",
+      subtitle: "Purchase Register ↔ GSTR-2A/2B supplier filings",
     },
     gstr3b: {
       title: "Form GSTR-3B Summary",
@@ -34,6 +36,10 @@ export function TopBar({
     anomalies: {
       title: "Anomaly Center",
       subtitle: "Audit exception tracking and discrepancy reviews",
+    },
+    gst_api: {
+      title: "GST Data Center",
+      subtitle: "Simulated GST Suvidha Provider (GSP) & return filings",
     },
     invoices: {
       title: "Invoice Master",
@@ -61,8 +67,33 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-left">
+        {onToggleSidebar && (
+          <button
+            type="button"
+            className="topbar-toggle-btn"
+            onClick={onToggleSidebar}
+            title="Toggle Navigation Menu"
+            aria-label="Toggle Navigation Menu"
+          >
+            <Menu size={18} />
+          </button>
+        )}
+
         <div className="page-title-group">
-          <h1>{current.title}</h1>
+          <div className="page-title-row">
+            <h1>{current.title}</h1>
+            {isSyntheticDemo ? (
+              <div className="demo-mode-pill" title="Synthetic simulated GST transaction ledger">
+                <span className="demo-mode-dot" />
+                <span>Demo Data</span>
+              </div>
+            ) : (
+              <div className="live-mode-pill" title="Connected to live registered enterprise ledger">
+                <span className="live-mode-dot" />
+                <span>Live Data</span>
+              </div>
+            )}
+          </div>
           <p>{current.subtitle}</p>
         </div>
       </div>
@@ -91,6 +122,7 @@ export function TopBar({
           title="Refresh Data"
           onClick={onRefresh}
           disabled={isRefreshing}
+          aria-label="Refresh Data"
         >
           <RotateCw size={15} className={isRefreshing ? "animate-spin" : ""} />
         </button>
@@ -100,6 +132,7 @@ export function TopBar({
           className="topbar-btn"
           title="Anomalies & Notifications"
           onClick={onOpenNotifications}
+          aria-label="Anomalies & Notifications"
         >
           <Bell size={15} />
           <span className="notif-dot" />
@@ -111,6 +144,7 @@ export function TopBar({
             className="topbar-btn btn-signout"
             title="Sign Out"
             onClick={onLogout}
+            aria-label="Sign Out"
           >
             <LogOut size={15} />
           </button>
@@ -119,3 +153,4 @@ export function TopBar({
     </header>
   );
 }
+export default TopBar;

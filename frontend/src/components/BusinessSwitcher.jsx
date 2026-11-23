@@ -50,15 +50,15 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
             alignItems: "center",
             gap: 8,
             padding: "6px 12px",
-            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            backgroundColor: "#ffffff",
             borderColor: "var(--border-color)",
             borderRadius: "var(--radius-md)",
             fontSize: 12.5,
             fontWeight: 600,
-            boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            boxShadow: "var(--shadow-xs)",
           }}
         >
-          <Building2 size={15} color="#ea580c" />
+          <Building2 size={15} color="#2563eb" />
           <div style={{ textAlign: "left", lineHeight: 1.2 }}>
             <div style={{ color: "var(--text-main)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {activeBusiness ? activeBusiness.name : "Select Business"}
@@ -91,7 +91,7 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
             }}
           >
             <div style={{ padding: "10px 14px 6px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#64748b", letterSpacing: "0.6px" }}>
-              Your Registered Entities ({businesses.length})
+              Registered Entities ({businesses.length})
             </div>
 
             <div style={{ maxHeight: 240, overflowY: "auto" }}>
@@ -107,26 +107,26 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
                       justifyContent: "space-between",
                       padding: "9px 14px",
                       cursor: "pointer",
-                      backgroundColor: isSelected ? "#fff7ed" : "transparent",
-                      borderLeft: isSelected ? "3px solid #ea580c" : "3px solid transparent",
+                      backgroundColor: isSelected ? "#eff6ff" : "transparent",
+                      borderLeft: isSelected ? "3px solid #2563eb" : "3px solid transparent",
                       transition: "background 0.15s ease",
                     }}
                     onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = "#fffbf7";
+                      if (!isSelected) e.currentTarget.style.backgroundColor = "#f8fafc";
                     }}
                     onMouseLeave={(e) => {
                       if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
                     }}
                   >
                     <div style={{ overflow: "hidden", paddingRight: 8 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: isSelected ? 700 : 500, color: isSelected ? "#c2410c" : "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: isSelected ? 700 : 500, color: isSelected ? "#1d4ed8" : "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {biz.name}
                       </div>
-                      <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: isSelected ? "#ea580c" : "#64748b" }}>
+                      <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: isSelected ? "#2563eb" : "#64748b" }}>
                         {biz.gstin}
                       </div>
                     </div>
-                    {isSelected && <Check size={14} color="#ea580c" style={{ flexShrink: 0 }} />}
+                    {isSelected && <Check size={14} color="#2563eb" style={{ flexShrink: 0 }} />}
                   </div>
                 );
               })}
@@ -148,151 +148,159 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
                   gap: 6,
                 }}
               >
-                <Plus size={13} color="#ea580c" />
-                <span>Add Another Business</span>
+                <Plus size={14} color="#2563eb" />
+                <span>Register New Entity</span>
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Modal to Register Additional Business - Rendered via Portal for True Center Alignment */}
       {showAddModal &&
         createPortal(
           <div
-            className="modal-overlay"
-            onClick={() => setShowAddModal(false)}
             style={{
               position: "fixed",
               inset: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.45)",
-              backdropFilter: "blur(8px)",
-              WebkitBackdropFilter: "blur(8px)",
+              backgroundColor: "rgba(15, 23, 42, 0.55)",
+              backdropFilter: "blur(6px)",
+              WebkitBackdropFilter: "blur(6px)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               zIndex: 9999,
-              padding: 20,
+              padding: 16,
+              animation: "fadeIn 0.15s ease",
             }}
           >
             <div
-              className="modal-content"
-              onClick={(e) => e.stopPropagation()}
               style={{
-                maxWidth: 520,
-                width: "100%",
-                borderRadius: 20,
                 backgroundColor: "#ffffff",
-                boxShadow: "0 24px 48px -12px rgba(15, 23, 42, 0.2), 0 8px 16px -4px rgba(0, 0, 0, 0.06)",
-                border: "1px solid rgba(226, 232, 240, 0.9)",
+                borderRadius: "16px",
+                width: "100%",
+                maxWidth: 440,
+                boxShadow: "0 24px 48px -12px rgba(15, 23, 42, 0.25)",
+                border: "1px solid #e2e8f0",
                 overflow: "hidden",
-                animation: "fadeIn 0.2s ease",
               }}
             >
-              <div className="modal-header" style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9" }}>
-                <div>
-                  <h3 className="modal-title" style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
-                    Link New Business Entity
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "18px 22px",
+                  borderBottom: "1px solid #f1f5f9",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: "8px",
+                      backgroundColor: "#eff6ff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#2563eb",
+                    }}
+                  >
+                    <Building2 size={16} />
+                  </div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                    Register Business Entity
                   </h3>
-                  <p style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                    Add a GSTIN to switch and reconcile separate business ledgers
-                  </p>
                 </div>
                 <button
                   type="button"
-                  className="topbar-btn"
                   onClick={() => setShowAddModal(false)}
-                  style={{ width: 32, height: 32, borderRadius: 8 }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#94a3b8",
+                    cursor: "pointer",
+                    padding: 4,
+                    display: "flex",
+                    borderRadius: "6px",
+                  }}
                 >
-                  <X size={15} />
+                  <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleAddSubmit}>
-                <div className="modal-body" style={{ padding: "24px" }}>
-                  {error && (
-                    <div
-                      style={{
-                        padding: "10px 14px",
-                        background: "var(--mismatch-bg)",
-                        border: "1px solid var(--mismatch-border)",
-                        borderRadius: 10,
-                        color: "var(--mismatch-text)",
-                        fontSize: 12.5,
-                        marginBottom: 16,
-                      }}
-                    >
-                      {error}
-                    </div>
-                  )}
-
-                  <div style={{ marginBottom: 18 }}>
-                    <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
-                      Business Legal Name
-                    </label>
-                    <input
-                      type="text"
-                      className="filter-input"
-                      style={{
-                        width: "100%",
-                        height: 48,
-                        borderRadius: 10,
-                        padding: "0 14px",
-                        fontSize: 13.5,
-                        backgroundColor: "rgba(255, 255, 255, 0.9)",
-                        border: "1px solid #e2e8f0",
-                        color: "#0f172a",
-                      }}
-                      placeholder="e.g. Apex Industrial Supplies"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      required
-                    />
+              <form onSubmit={handleAddSubmit} style={{ padding: "20px 22px" }}>
+                {error && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: "#fef2f2",
+                      border: "1px solid #fca5a5",
+                      borderRadius: "8px",
+                      color: "#dc2626",
+                      fontSize: 12.5,
+                      marginBottom: 16,
+                    }}
+                  >
+                    {error}
                   </div>
+                )}
 
-                  <div>
-                    <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
-                      Statutory GSTIN (15 characters)
-                    </label>
-                    <input
-                      type="text"
-                      className="filter-input mono-cell"
-                      style={{
-                        width: "100%",
-                        height: 48,
-                        borderRadius: 10,
-                        padding: "0 14px",
-                        fontSize: 13.5,
-                        textTransform: "uppercase",
-                        backgroundColor: "rgba(255, 255, 255, 0.9)",
-                        border: "1px solid #e2e8f0",
-                        color: "#0f172a",
-                      }}
-                      placeholder="29AAAAA0000A1Z5"
-                      maxLength={15}
-                      value={newGstin}
-                      onChange={(e) => setNewGstin(e.target.value.toUpperCase())}
-                      required
-                    />
-                  </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+                    Entity / Legal Business Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Apex Industrial Solutions Ltd"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: 40,
+                      padding: "0 12px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      fontSize: 13,
+                      boxSizing: "border-box",
+                      outline: "none",
+                    }}
+                  />
                 </div>
 
-                <div
-                  className="modal-footer"
-                  style={{
-                    padding: "16px 24px",
-                    borderTop: "1px solid #f1f5f9",
-                    backgroundColor: "#fafafa",
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 10,
-                  }}
-                >
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+                    15-digit GSTIN
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={15}
+                    placeholder="e.g. 29AAAAA1111A1Z5"
+                    value={newGstin}
+                    onChange={(e) => setNewGstin(e.target.value.toUpperCase())}
+                    style={{
+                      width: "100%",
+                      height: 40,
+                      padding: "0 12px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      fontSize: 13,
+                      fontFamily: "var(--font-mono)",
+                      boxSizing: "border-box",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <button
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => setShowAddModal(false)}
-                    style={{ height: 44, padding: "0 18px", borderRadius: 10, fontSize: 13, fontWeight: 600 }}
+                    disabled={loading}
+                    style={{ height: 38, fontSize: 12.5 }}
                   >
                     Cancel
                   </button>
@@ -300,7 +308,7 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
                     type="submit"
                     className="btn btn-primary"
                     disabled={loading}
-                    style={{ height: 44, padding: "0 22px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}
+                    style={{ height: 38, fontSize: 12.5, gap: 6 }}
                   >
                     {loading ? "Registering..." : "Add Business"}
                   </button>
@@ -313,3 +321,4 @@ export function BusinessSwitcher({ businesses = [], activeBusiness, onSelectBusi
     </>
   );
 }
+export default BusinessSwitcher;

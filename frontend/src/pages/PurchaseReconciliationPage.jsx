@@ -139,8 +139,8 @@ export function PurchaseReconciliationPage({
           icon={CheckCircle2}
           subtext="Confirmed vendor filings"
           iconBg="#ecfdf5"
-          iconColor="#059669"
-          accentColor="#059669"
+          iconColor="#16a34a"
+          accentColor="#16a34a"
         />
         <KPICard
           title="ITC Mismatches"
@@ -181,3 +181,4 @@ export function PurchaseReconciliationPage({
     </div>
   );
 }
+export default PurchaseReconciliationPage;

@@ -16,15 +16,15 @@ export function Footer({ onNavigate }) {
               </svg>
             </div>
             <div>
-              <h3>GST Reconciliation & Anomaly Detection Platform</h3>
+              <h3>ReconcilePro Compliance Suite</h3>
               <p className="footer-sub">MSME GST Compliance & Financial Reconciliation</p>
             </div>
           </div>
           <p className="footer-desc">
-            An automated reconciliation and exception detection system engineered for Indian MSMEs to verify outward sales against GSTR-1, validate eligible Input Tax Credit against GSTR-2A, and audit discrepancy risks.
+            An automated reconciliation and exception detection system engineered for Indian MSMEs to verify outward sales against GSTR-1, validate eligible Input Tax Credit against GSTR-2A/2B, and audit discrepancy risks.
           </p>
           <div className="footer-badge">
-            <ShieldCheck size={14} color="#ea580c" />
+            <ShieldCheck size={14} color="#2563eb" />
             <span>Authenticated Multi-Tenant Architecture</span>
           </div>
         </div>
@@ -44,7 +44,7 @@ export function Footer({ onNavigate }) {
             </li>
             <li>
               <button type="button" onClick={() => onNavigate && onNavigate("purchase")}>
-                <ArrowRight size={12} /> Purchase ↔ GSTR-2A (ITC)
+                <ArrowRight size={12} /> Purchase ↔ GSTR-2A/2B (ITC)
               </button>
             </li>
             <li>
@@ -94,16 +94,15 @@ export function Footer({ onNavigate }) {
 
       <div className="footer-bottom">
         <div className="footer-bottom-content">
-          <p>© 2026 GST Reconciliation & Anomaly Detection Platform. Educational & demonstration project.</p>
+          <p>© 2026 ReconcilePro MSME Compliance Platform. Educational & demonstration project.</p>
           <div className="footer-meta">
             <span className="status-indicator">
               <span className="status-dot"></span> System Status: Active
             </span>
-            <span className="meta-sep">•</span>
-            <span>Release v1.2.0-Production</span>
           </div>
         </div>
       </div>
     </footer>
   );
 }
+export default Footer;

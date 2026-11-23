@@ -153,7 +153,7 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [] }) {
             </div>
             <div className="statement-box highlight-primary">
               <span className="box-label">Table 4(C): Net ITC Credited</span>
-              <span className="box-val text-saffron">{formatCurrency(netItc)}</span>
+              <span className="box-val text-primary">{formatCurrency(netItc)}</span>
               <span className="box-sub">Available in Electronic Credit Ledger</span>
             </div>
             <div className="statement-box highlight-amber">

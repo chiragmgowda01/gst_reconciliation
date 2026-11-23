@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.models import Business, Invoice
+# pyrefly: ignore[missing-import]
 from reconciliation.reconcile import reconcile
 from services.auth import get_current_business
 
@@ -119,12 +120,13 @@ def run_reconciliation(
 
     # For GSTR-2B: add specific statutory note on missing records (do not assume automatic ineligibility)
     if norm_purchase_source == "gstr2b" and not purchase_res_df.empty:
-        for idx in range(len(purchase_res_df)):
-            if purchase_res_df.at[idx, "status"] == "MISSING_IN_GST":
-                purchase_res_df.at[idx, "explanation"] = (
-                    "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
-                    "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
-                )
+        note_gstr2b = (
+            "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
+            "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
+        )
+        missing_mask = purchase_res_df["status"] == "MISSING_IN_GST"
+        purchase_res_df.loc[missing_mask, "explanation"] = note_gstr2b
+        purchase_res_df.loc[missing_mask, "reason"] = note_gstr2b
 
     sales_data = _df_to_records(sales_res_df)
     purchase_data = _df_to_records(purchase_res_df)

@@ -62,6 +62,14 @@ def _build_engine(url: str | None):
 engine = _build_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+# Ensure schema is up to date whenever database is accessed
+try:
+    from models.base import Base
+    import models.models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+except Exception as _init_exc:
+    logger.debug("Database metadata initialization skipped: %s", _init_exc)
+
 
 def get_db():
     db = SessionLocal()

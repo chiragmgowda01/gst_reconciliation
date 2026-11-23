@@ -71,7 +71,7 @@ export function LoginPage({ onLoginSuccess }) {
 
   return (
     <div className="login-viewport">
-      {/* Abstract decorative ambient blobs for glassmorphism */}
+      {/* Abstract decorative ambient blobs for modern fintech aesthetic */}
       <div className="login-ambient-blob blob-1"></div>
       <div className="login-ambient-blob blob-2"></div>
       <div className="login-ambient-blob blob-3"></div>
@@ -83,14 +83,14 @@ export function LoginPage({ onLoginSuccess }) {
           <div className="login-brand-header">
             <div className="login-logo-box">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="2" y="3" width="20" height="18" rx="4" fill="url(#loginSaffronGrad)" />
+                <rect x="2" y="3" width="20" height="18" rx="4" fill="url(#fintechLoginGrad)" />
                 <path d="M7 8h10M7 12h6M7 16h8" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                <circle cx="16" cy="14" r="3.5" fill="#0f1e36" stroke="#ffffff" strokeWidth="1.5" />
-                <path d="M15 14l1 1 2-2" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" />
+                <circle cx="16" cy="14" r="3.5" fill="#0f172a" stroke="#38bdf8" strokeWidth="1.5" />
+                <path d="M15 14l1 1 2-2" stroke="#38bdf8" strokeWidth="1.2" strokeLinecap="round" />
                 <defs>
-                  <linearGradient id="loginSaffronGrad" x1="2" y1="3" x2="22" y2="21" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#f97316" />
-                    <stop offset="1" stopColor="#ea580c" />
+                  <linearGradient id="fintechLoginGrad" x1="2" y1="3" x2="22" y2="21" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#2563eb" />
+                    <stop offset="1" stopColor="#0d9488" />
                   </linearGradient>
                 </defs>
               </svg>
@@ -187,7 +187,7 @@ export function LoginPage({ onLoginSuccess }) {
                 }}
               >
                 <div className="demo-header">
-                  <Shield size={13} color="#ea580c" />
+                  <Shield size={13} color="#2563eb" />
                   <span>Demo Access (Click to auto-fill)</span>
                 </div>
                 <div className="demo-credentials">
@@ -221,9 +221,10 @@ export function LoginPage({ onLoginSuccess }) {
                   <input
                     type="email"
                     className="polished-input"
-                    placeholder="name@company.com"
+                    placeholder="ramesh@apex-industries.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="username"
                     required
                   />
                 </div>
@@ -236,23 +237,23 @@ export function LoginPage({ onLoginSuccess }) {
                   <input
                     type="password"
                     className="polished-input"
-                    placeholder="••••••••"
-                    minLength={6}
+                    placeholder="Create a strong password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
                     required
                   />
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Business Name</label>
+                <label className="form-label">Registered Enterprise / Legal Business Name</label>
                 <div className="input-box-wrapper">
                   <Building2 size={17} className="input-leading-icon" />
                   <input
                     type="text"
                     className="polished-input"
-                    placeholder="Precision Components Pvt Ltd"
+                    placeholder="Apex Industrial Components Pvt Ltd"
                     value={businessName}
                     onChange={(e) => setBusinessName(e.target.value)}
                     required
@@ -261,14 +262,14 @@ export function LoginPage({ onLoginSuccess }) {
               </div>
 
               <div className="form-group">
-                <label className="form-label">GSTIN (15 characters)</label>
+                <label className="form-label">15-digit GSTIN</label>
                 <div className="input-box-wrapper">
+                  <span style={{ padding: "0 10px", fontSize: 11, fontWeight: 700, color: "#64748b" }}>GST</span>
                   <input
                     type="text"
-                    className="polished-input mono-font uppercase"
-                    style={{ paddingLeft: "14px" }}
-                    placeholder="29AAAAA0000A1Z5"
+                    className="polished-input font-mono"
                     maxLength={15}
+                    placeholder="29AAAAA1111A1Z5"
                     value={gstin}
                     onChange={(e) => setGstin(e.target.value.toUpperCase())}
                     required
@@ -281,7 +282,7 @@ export function LoginPage({ onLoginSuccess }) {
                 className="login-primary-btn"
                 disabled={loading}
               >
-                {loading ? "Registering..." : "Register MSME"}
+                {loading ? "Registering..." : "Complete Registration"}
                 {!loading && <ArrowRight size={16} />}
               </button>
             </form>
@@ -291,3 +292,4 @@ export function LoginPage({ onLoginSuccess }) {
     </div>
   );
 }
+export default LoginPage;

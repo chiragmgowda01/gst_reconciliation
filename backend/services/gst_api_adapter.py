@@ -7,7 +7,12 @@ to an authorised GST Suvidha Provider (GSP) or the official GST API gateway.
 IMPORTANT — Current Status:
     No live GST API credentials or provider have been selected/authorized.
     This module implements the full interface and an offline mock/fixture adapter
-    for testing and demonstration purposes.
+    that reads from the project's synthetic CSV data files.
+
+    All responses are clearly labelled with:
+        is_mock_data: true
+        provider: "mock"
+        data_source: "synthetic_csv"
 
     To enable live integration:
     1. Select an authorised GST Suvidha Provider (e.g. Karvy, NSDL, Tata Consultancy, etc.)
@@ -22,11 +27,18 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
-from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
+
 logger = logging.getLogger(__name__)
+
+# Project root is two levels above this file: backend/services/ → backend/ → root/
+_ROOT = Path(__file__).resolve().parents[2]
+_DATA = _ROOT / "data"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -86,6 +98,123 @@ gst_config = GstApiConfig()
 
 
 # ─────────────────────────────────────────────────────────────
+# GSTIN format validation helpers
+# ─────────────────────────────────────────────────────────────
+
+_GSTIN_RE = re.compile(
+    # State code: 01–37 (00 and 38–99 are invalid)
+    r"^(0[1-9]|[12][0-9]|3[0-7])"
+    r"[A-Z]{5}"             # PAN first 5 alpha chars (uppercase only)
+    r"[0-9]{4}"             # PAN 4 numeric chars
+    r"[A-Z]"                # PAN 10th (entity type, uppercase only)
+    r"[1-9A-Z]"             # Registration order (1–9, A–Z)
+    r"Z"                    # Always literal 'Z'
+    r"[0-9A-Z]$"            # Checksum character
+)
+
+
+def validate_gstin_format(gstin: str) -> bool:
+    """
+    Validate a GSTIN against its documented 15-character structural pattern.
+
+    IMPORTANT: A format-valid GSTIN is NOT confirmed as registered or active.
+    Format checks catch malformed strings only. Actual registration status
+    can only be verified through the official GST Common Portal API.
+
+    Note: Lowercase GSTINs are intentionally rejected — the official portal
+    issues GSTINs in uppercase only. Callers must normalise case themselves
+    if they want case-insensitive matching.
+    """
+    if not gstin or not isinstance(gstin, str):
+        return False
+    # Use fullmatch (not match) to reject strings with trailing characters.
+    # Do NOT call .upper() — lowercase input is treated as invalid.
+    return bool(_GSTIN_RE.fullmatch(gstin.strip()))
+
+
+# ─────────────────────────────────────────────────────────────
+# CSV loading utilities
+# ─────────────────────────────────────────────────────────────
+
+def _load_csv(filename: str, required_columns: List[str]) -> pd.DataFrame:
+    """
+    Load a CSV from the data directory with UTF-8-sig decoding.
+    Raises FileNotFoundError or ValueError with clear messages.
+    """
+    path = _DATA / filename
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Required data file not found: {path}. "
+            "Ensure the synthetic CSV fixtures are present in the data/ directory."
+        )
+    try:
+        df = pd.read_csv(path, encoding="utf-8-sig", dtype=str)
+    except Exception as exc:
+        raise ValueError(f"Failed to parse CSV file '{filename}': {exc}") from exc
+
+    df.columns = [c.strip() for c in df.columns]
+    missing = [c for c in required_columns if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"CSV file '{filename}' is missing required columns: {missing}. "
+            f"Found columns: {list(df.columns)}"
+        )
+    return df
+
+
+def _invoice_columns_outward() -> List[str]:
+    return ["invoice_no", "invoice_date", "customer_gstin", "taxable_value", "gst_amount"]
+
+
+def _invoice_columns_inward() -> List[str]:
+    return ["invoice_no", "invoice_date", "supplier_gstin", "taxable_value", "gst_amount"]
+
+
+def _filter_by_period(df: pd.DataFrame, tax_period: Optional[str], date_col: str = "invoice_date") -> pd.DataFrame:
+    """
+    Filter rows by tax_period (YYYY-MM) using the invoice date column.
+    Returns all rows when tax_period is None or empty.
+    """
+    if not tax_period or df.empty:
+        return df
+    year_month = tax_period.strip()[:7]  # Ensure YYYY-MM
+    # Match rows whose invoice_date starts with YYYY-MM
+    mask = df[date_col].astype(str).str.startswith(year_month)
+    return df[mask].copy()
+
+
+def _filter_by_gstin(df: pd.DataFrame, counterparty_gstin: Optional[str], gstin_col: str) -> pd.DataFrame:
+    """Filter rows by counterparty GSTIN (case-insensitive)."""
+    if not counterparty_gstin or df.empty:
+        return df
+    return df[df[gstin_col].astype(str).str.upper() == counterparty_gstin.strip().upper()].copy()
+
+
+def _df_to_records(df: pd.DataFrame, gstin_col: str, source: str, tax_period: Optional[str]) -> List[Dict[str, Any]]:
+    """Convert a filtered invoice DataFrame to a list of normalised dicts."""
+    records = []
+    for _, row in df.iterrows():
+        try:
+            tv = float(str(row.get("taxable_value", 0)).replace(",", "") or 0)
+            ga = float(str(row.get("gst_amount", 0)).replace(",", "") or 0)
+        except (ValueError, TypeError):
+            tv, ga = 0.0, 0.0
+        records.append({
+            "invoice_no": str(row.get("invoice_no", "")).strip(),
+            "invoice_date": str(row.get("invoice_date", "")).strip(),
+            "gstin": str(row.get(gstin_col, "")).strip(),
+            "taxable_value": tv,
+            "gst_amount": ga,
+            "source": source,
+            "is_mock_data": True,
+            "data_source": "synthetic_csv",
+            "provider": "mock",
+            "tax_period": tax_period,
+        })
+    return records
+
+
+# ─────────────────────────────────────────────────────────────
 # Provider interface (Abstract Base Class)
 # ─────────────────────────────────────────────────────────────
 
@@ -99,14 +228,20 @@ class GstApiAdapter(ABC):
     """
 
     @abstractmethod
-    def get_gstr1(self, gstin: str, tax_period: str) -> List[Dict[str, Any]]:
+    def get_gstr1(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Fetch GSTR-1 outward supply invoices for a given GSTIN and period.
 
         Parameters
         ----------
         gstin : str — 15-character GSTIN of the taxpayer
-        tax_period : str — Period in MMYYYY format (GST API convention)
+        tax_period : str — Period in YYYY-MM format
+        counterparty_gstin : str, optional — Filter by customer GSTIN
 
         Returns
         -------
@@ -115,8 +250,22 @@ class GstApiAdapter(ABC):
         """
 
     @abstractmethod
-    def get_gstr2a(self, gstin: str, tax_period: str) -> List[Dict[str, Any]]:
+    def get_gstr2a(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Fetch GSTR-2A auto-drafted inward supply invoices."""
+
+    @abstractmethod
+    def get_gstr2b(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch GSTR-2B static auto-drafted ITC statement invoices."""
 
     @abstractmethod
     def get_gstr3b_summary(self, gstin: str, tax_period: str) -> Dict[str, Any]:
@@ -137,81 +286,131 @@ class GstApiAdapter(ABC):
 
 
 # ─────────────────────────────────────────────────────────────
-# Mock / Fixture adapter (for tests and labelled demo mode)
+# Mock / Fixture adapter — reads from synthetic CSV data files
 # ─────────────────────────────────────────────────────────────
 
 class MockGstAdapter(GstApiAdapter):
     """
-    Offline mock adapter that returns clearly-labelled fixture data.
+    Offline mock adapter that reads from the project's synthetic CSV fixtures.
 
-    IMPORTANT: This adapter MUST NEVER be used to present data as live GST records.
-    All responses include `is_mock_data: true` to prevent ambiguity.
+    Data sources:
+        GSTR-1  → data/gstr1.csv      (outward supply filings on portal)
+        GSTR-2A → data/gstr2a.csv     (dynamic inward from supplier filings)
+        GSTR-2B → data/gstr2b.csv     (static auto-drafted ITC statement)
+        GSTR-3B → data/gstr3b.csv     (monthly summary return)
 
-    Use cases:
-    - Unit and integration tests
-    - Demonstrations when no live GSP credentials are available
-    - Local development without internet access
+    IMPORTANT:
+        - data/sales_register.csv is the company's internal outward book — NOT gstr1.
+        - data/purchase_register.csv is the company's internal inward book — NOT gstr2a/2b.
+        - This adapter MUST NEVER be used to present data as live GST records.
+        - All responses include `is_mock_data: true` and `provider: "mock"`.
+        - GSTIN format validation is performed but does NOT confirm registration.
     """
 
-    FIXTURE_PERIOD = "072026"  # July 2026 in GST API MMYYYY format
-
     def authenticate(self) -> None:
-        logger.info("[MockGstAdapter] No authentication required for mock adapter.")
-
-    def get_gstr1(self, gstin: str, tax_period: str) -> List[Dict[str, Any]]:
-        logger.info(
-            "[MockGstAdapter] Returning mock GSTR-1 data for GSTIN=%s period=%s",
-            gstin[:6] + "XXXX" if gstin else "UNKNOWN",  # Mask most of GSTIN in logs
-            tax_period,
-        )
-        return [
-            {
-                "invoice_no": "MOCK-S001",
-                "invoice_date": "2026-07-02",
-                "gstin": "29ABCDE1234F1Z5",
-                "taxable_value": 45000.0,
-                "gst_amount": 8100.0,
-                "is_mock_data": True,
-                "source": "gstr1_api",
-            },
-            {
-                "invoice_no": "MOCK-S002",
-                "invoice_date": "2026-07-10",
-                "gstin": "29BCDEF2345G1Z6",
-                "taxable_value": 72500.0,
-                "gst_amount": 13050.0,
-                "is_mock_data": True,
-                "source": "gstr1_api",
-            },
-        ]
-
-    def get_gstr2a(self, gstin: str, tax_period: str) -> List[Dict[str, Any]]:
-        logger.info("[MockGstAdapter] Returning mock GSTR-2A data.")
-        return [
-            {
-                "invoice_no": "MOCK-P001",
-                "invoice_date": "2026-07-03",
-                "gstin": "29PQRST1234A1Z1",
-                "taxable_value": 85000.0,
-                "gst_amount": 15300.0,
-                "is_mock_data": True,
-                "source": "gstr2a_api",
-            },
-        ]
-
-    def get_gstr3b_summary(self, gstin: str, tax_period: str) -> Dict[str, Any]:
-        logger.info("[MockGstAdapter] Returning mock GSTR-3B summary.")
-        return {
-            "tax_period": "2026-07",
-            "output_tax": 143190.0,
-            "eligible_itc": 43470.0,
-            "itc_reversed": 1200.0,
-            "net_itc": 42270.0,
-            "is_mock_data": True,
-        }
+        logger.info("[MockGstAdapter] No authentication required for mock/CSV adapter.")
 
     def healthcheck(self) -> Dict[str, Any]:
-        return {"status": "ok", "provider": "mock", "is_mock": True}
+        return {
+            "status": "ok",
+            "provider": "mock",
+            "is_mock_data": True,
+            "data_source": "synthetic_csv",
+            "note": (
+                "This adapter reads from local synthetic CSV fixtures. "
+                "No live GST portal connection is active."
+            ),
+        }
+
+    def get_gstr1(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        logger.info(
+            "[MockGstAdapter] Loading GSTR-1 from gstr1.csv for period=%s", tax_period
+        )
+        df = _load_csv("gstr1.csv", _invoice_columns_outward())
+        df = _filter_by_period(df, tax_period)
+        df = _filter_by_gstin(df, counterparty_gstin, "customer_gstin")
+        return _df_to_records(df, "customer_gstin", "gstr1_csv", tax_period)
+
+    def get_gstr2a(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        logger.info(
+            "[MockGstAdapter] Loading GSTR-2A from gstr2a.csv for period=%s", tax_period
+        )
+        df = _load_csv("gstr2a.csv", _invoice_columns_inward())
+        df = _filter_by_period(df, tax_period)
+        df = _filter_by_gstin(df, counterparty_gstin, "supplier_gstin")
+        return _df_to_records(df, "supplier_gstin", "gstr2a_csv", tax_period)
+
+    def get_gstr2b(
+        self,
+        gstin: str,
+        tax_period: str,
+        counterparty_gstin: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        logger.info(
+            "[MockGstAdapter] Loading GSTR-2B from gstr2b.csv for period=%s", tax_period
+        )
+        df = _load_csv("gstr2b.csv", _invoice_columns_inward())
+        df = _filter_by_period(df, tax_period)
+        df = _filter_by_gstin(df, counterparty_gstin, "supplier_gstin")
+        return _df_to_records(df, "supplier_gstin", "gstr2b_csv", tax_period)
+
+    def get_gstr3b_summary(self, gstin: str, tax_period: str) -> Dict[str, Any]:
+        logger.info(
+            "[MockGstAdapter] Loading GSTR-3B from gstr3b.csv for period=%s", tax_period
+        )
+        df = _load_csv("gstr3b.csv", ["tax_period", "output_tax", "eligible_itc", "itc_reversed", "net_itc"])
+
+        # Filter by exact tax_period
+        if tax_period:
+            period_norm = tax_period.strip()[:7]
+            matched = df[df["tax_period"].astype(str).str.strip() == period_norm]
+        else:
+            matched = df
+
+        if matched.empty:
+            # Return explicit empty signal — do not substitute another period silently
+            return {
+                "tax_period": tax_period,
+                "output_tax": None,
+                "eligible_itc": None,
+                "itc_reversed": None,
+                "net_itc": None,
+                "is_mock_data": True,
+                "data_source": "synthetic_csv",
+                "provider": "mock",
+                "found": False,
+                "note": f"No GSTR-3B data found for tax period '{tax_period}' in the synthetic CSV fixture.",
+            }
+
+        row = matched.iloc[0]
+
+        def _safe(col: str) -> Optional[float]:
+            try:
+                return float(str(row.get(col, "") or "").replace(",", ""))
+            except (ValueError, TypeError):
+                return None
+
+        return {
+            "tax_period": str(row.get("tax_period", tax_period)).strip(),
+            "output_tax": _safe("output_tax"),
+            "eligible_itc": _safe("eligible_itc"),
+            "itc_reversed": _safe("itc_reversed"),
+            "net_itc": _safe("net_itc"),
+            "is_mock_data": True,
+            "data_source": "synthetic_csv",
+            "provider": "mock",
+            "found": True,
+        }
 
 
 # ─────────────────────────────────────────────────────────────
@@ -222,7 +421,7 @@ def get_gst_adapter() -> GstApiAdapter:
     """
     Factory function — returns the appropriate adapter based on environment config.
 
-    Currently only the mock adapter is implemented.
+    Currently only the mock/CSV adapter is implemented.
 
     To add a live adapter:
     1. Implement a subclass of GstApiAdapter for your GSP.
@@ -234,7 +433,7 @@ def get_gst_adapter() -> GstApiAdapter:
 
     if provider == "mock" or gst_config.demo_mode:
         logger.info(
-            "[GstApiAdapter] Using mock adapter. "
+            "[GstApiAdapter] Using mock/CSV adapter. "
             "Set GST_API_PROVIDER and GST_API_DEMO_MODE=false for live integration."
         )
         return MockGstAdapter()
@@ -255,7 +454,7 @@ def get_gst_adapter() -> GstApiAdapter:
 
 
 # ─────────────────────────────────────────────────────────────
-# Response normalisation helpers
+# Response normalisation helpers (preserved for compatibility)
 # ─────────────────────────────────────────────────────────────
 
 def normalise_invoice(raw: Dict[str, Any], source_type: str) -> Dict[str, Any]:
