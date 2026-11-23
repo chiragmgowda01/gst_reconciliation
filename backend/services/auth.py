@@ -70,7 +70,8 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, stored_password: str) -> Tuple[bool, bool]:
     """
     Verify password. Returns (is_valid, needs_rehash).
-    Handles modern PBKDF2-SHA256 hashes, legacy plain-text accounts, and documented demo passwords.
+    Validates against PBKDF2-HMAC-SHA256 hash or legacy plain-text password.
+    Ensures no hardcoded authentication bypasses or cross-password collisions exist.
     """
     if not stored_password or not plain_password:
         return False, False
@@ -88,25 +89,10 @@ def verify_password(plain_password: str, stored_password: str) -> Tuple[bool, bo
             )
             if hmac.compare_digest(computed_key.hex(), expected_hash):
                 return True, False
+        return False, False
 
-            # Check if this stored hash matches any standard demo password, allowing seamless demo upgrade
-            if plain_password in ("Demo@123", "password123", "changeme"):
-                for demo_pwd in ("Demo@123", "password123", "changeme"):
-                    demo_key = hashlib.pbkdf2_hmac(
-                        "sha256",
-                        demo_pwd.encode("utf-8"),
-                        salt.encode("utf-8"),
-                        100_000,
-                    )
-                    if hmac.compare_digest(demo_key.hex(), expected_hash):
-                        return True, True
-
-    # Legacy plain-text fallback (e.g. initial demo seed data)
+    # Legacy plain-text fallback (e.g. initial demo seed data / migration)
     if hmac.compare_digest(plain_password, stored_password):
-        return True, True
-
-    # If legacy stored was changeme or demo password, allow standard alternatives
-    if stored_password in ("Demo@123", "password123", "changeme") and plain_password in ("Demo@123", "password123", "changeme"):
         return True, True
 
     return False, False

@@ -67,24 +67,29 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
             detail="An account with this email address already exists.",
         )
 
-    # 3. Hash password using PBKDF2-SHA256
-    hashed_pwd = hash_password(req.password)
-
-    # 4. Create User
-    user = User(
-        name=req.name.strip(),
-        email=req.email.lower().strip(),
-        password=hashed_pwd,
-    )
-    db.add(user)
-    db.flush()
-
-    # 5. Create initial Business for user
+    # 3. Check if GSTIN already registered to an existing business
     gstin_clean = req.gstin.strip().upper()
     existing_biz = db.scalar(select(Business).where(Business.gstin == gstin_clean))
-    if existing_biz:
-        business = existing_biz
-    else:
+    if existing_biz is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"GSTIN '{gstin_clean}' is already registered to another enterprise account.",
+        )
+
+    try:
+        # 4. Hash password using PBKDF2-SHA256
+        hashed_pwd = hash_password(req.password)
+
+        # 5. Create User
+        user = User(
+            name=req.name.strip(),
+            email=req.email.lower().strip(),
+            password=hashed_pwd,
+        )
+        db.add(user)
+        db.flush()
+
+        # 6. Create initial Business for user
         business = Business(
             name=req.business_name.strip(),
             gstin=gstin_clean,
@@ -93,9 +98,12 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         db.add(business)
         db.flush()
 
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    # 6. Issue Token
+    # 7. Issue Token
     token = create_access_token(user_id=user.id, email=user.email)
 
     return {
@@ -117,9 +125,6 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         )
 
     is_valid, needs_rehash = verify_password(req.password, user.password)
-    if not is_valid and user.email == "default@gst.local" and req.password in ("Demo@123", "password123", "changeme"):
-        is_valid = True
-        needs_rehash = True
 
     if not is_valid:
         raise HTTPException(
@@ -128,7 +133,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Progressive upgrade: if legacy plaintext or demo password, replace with PBKDF2 hash on successful login
+    # Progressive upgrade: if legacy plaintext, replace with PBKDF2 hash on successful login
     if needs_rehash:
         user.password = hash_password(req.password)
         db.commit()
@@ -178,17 +183,25 @@ def add_business(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=gstin_err)
 
     gstin_clean = req.gstin.strip().upper()
-    existing = db.scalar(
-        select(Business).where(Business.gstin == gstin_clean, Business.user_id == current_user.id)
-    )
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Business with GSTIN '{gstin_clean}' is already linked to your account.",
-        )
+    existing_biz = db.scalar(select(Business).where(Business.gstin == gstin_clean))
+    if existing_biz:
+        if existing_biz.user_id == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Business with GSTIN '{gstin_clean}' is already linked to your account.",
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"GSTIN '{gstin_clean}' is already registered to another enterprise account.",
+            )
 
-    business = Business(name=req.name.strip(), gstin=gstin_clean, user_id=current_user.id)
-    db.add(business)
-    db.commit()
+    try:
+        business = Business(name=req.name.strip(), gstin=gstin_clean, user_id=current_user.id)
+        db.add(business)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return {"id": business.id, "name": business.name, "gstin": business.gstin}

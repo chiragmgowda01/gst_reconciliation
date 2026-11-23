@@ -3,8 +3,9 @@ import { Building2, Lock, Mail, User, AlertCircle, ArrowRight, Shield } from "lu
 import { api } from "../api/client";
 
 export function LoginPage({ onLoginSuccess }) {
+  const enableDemoAccess = import.meta.env.VITE_ENABLE_DEMO_ACCESS === "true";
   const [tab, setTab] = useState("login"); // "login" | "register"
-  const [email, setEmail] = useState("default@gst.local");
+  const [email, setEmail] = useState(enableDemoAccess ? "default@gst.local" : "");
   const [password, setPassword] = useState("");
 
   // Register fields
@@ -175,26 +176,28 @@ export function LoginPage({ onLoginSuccess }) {
                 {!loading && <ArrowRight size={16} />}
               </button>
 
-              {/* Compact Demo Access Box */}
-              <div
-                className="demo-access-box"
-                style={{ cursor: "pointer" }}
-                title="Click to auto-fill demo credentials"
-                onClick={() => {
-                  setEmail("default@gst.local");
-                  setPassword("Demo@123");
-                  setError("");
-                }}
-              >
-                <div className="demo-header">
-                  <Shield size={13} color="#2563eb" />
-                  <span>Demo Access (Click to auto-fill)</span>
+              {/* Compact Demo Access Box - conditionally displayed only when VITE_ENABLE_DEMO_ACCESS is true */}
+              {enableDemoAccess && (
+                <div
+                  className="demo-access-box"
+                  style={{ cursor: "pointer" }}
+                  title="Click to auto-fill demo credentials"
+                  onClick={() => {
+                    setEmail("default@gst.local");
+                    setPassword("Demo@123");
+                    setError("");
+                  }}
+                >
+                  <div className="demo-header">
+                    <Shield size={13} color="#2563eb" />
+                    <span>Demo Access (Click to auto-fill)</span>
+                  </div>
+                  <div className="demo-credentials">
+                    <div>Email: <strong>default@gst.local</strong></div>
+                    <div>Password: <strong>Demo@123</strong> (or <strong>password123</strong>)</div>
+                  </div>
                 </div>
-                <div className="demo-credentials">
-                  <div>Email: <strong>default@gst.local</strong></div>
-                  <div>Password: <strong>Demo@123</strong> (or <strong>password123</strong>)</div>
-                </div>
-              </div>
+              )}
             </form>
           ) : (
             /* Register Form */
