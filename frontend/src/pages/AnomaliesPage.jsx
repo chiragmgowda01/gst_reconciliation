@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
-import { ShieldAlert, AlertTriangle, AlertCircle, Search, Filter, CheckCircle2, Brain } from "lucide-react";
+import { ShieldAlert, AlertTriangle, AlertCircle, Search, Filter, CheckCircle2 } from "lucide-react";
 import { StatusBadge } from "../components/StatusBadge";
 import { KPICard } from "../components/KPICard";
 
-export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
+export function AnomaliesPage({ anomalies = [], mlMeta = null, onNavigate }) {
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -35,52 +35,45 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
     }).format(val);
   };
 
-  const mlCount = anomalies.filter((a) => a.type === "ML_UNUSUAL_PATTERN").length;
-
   return (
     <div className="animate-fade-in">
       {/* ML Analysis Status Banner */}
-      {mlMeta && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "10px 16px",
-            marginBottom: 16,
-            borderRadius: 8,
-            background: mlMeta.ml_available ? "#f0fdfa" : "#f8fafc",
-            border: `1px solid ${mlMeta.ml_available ? "#99f6e4" : "#e2e8f0"}`,
-            fontSize: 12.5,
-            color: mlMeta.ml_available ? "#0f766e" : "#64748b",
-          }}
-        >
-          <Brain size={16} color={mlMeta.ml_available ? "#0d9488" : "#94a3b8"} />
+      {mlMeta && mlMeta.n_records_used > 0 && (
+        <details className="data-source-note">
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>About anomaly analysis</summary>
           <span>
-            <strong>Isolation Forest ML Analysis:</strong>{" "}
+            Rule checks and an Isolation Forest model review {mlMeta.n_records_used} records.
             {mlMeta.ml_available
-              ? `Active — analysed ${mlMeta.n_records_used} records, flagged ${mlMeta.n_outliers} unusual patterns.`
-              : mlMeta.reason || "Not available."}
+              ? ` The model flagged ${mlMeta.n_outliers} unusual patterns for review.`
+              : ` Statistical analysis is unavailable: ${mlMeta.reason || "not enough data"}`}
+            {" These results are prompts for review, not confirmed compliance findings."}
           </span>
-          {!mlMeta.ml_available && (
-            <span style={{ marginLeft: 4, color: "#94a3b8" }}>(Deterministic rules still active)</span>
-          )}
-        </div>
+        </details>
       )}
 
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
-          <h2 className="section-title">Anomaly & Risk Analysis Center</h2>
+          <h2 className="section-title">Anomalies</h2>
           <p className="section-subtitle">
-            Deterministic audit rules + Isolation Forest ML analysis for reconciliation exceptions and unusual patterns
+            Review records that need attention.
           </p>
-        </div>
-        <div className="section-badge">
-          {anomalies.length} Potential Anomalies Tracked ({mlCount} ML-Scored)
         </div>
       </div>
 
+      {anomalies.length === 0 ? (
+        <div className="institutional-card empty-state-card">
+          <div className="empty-state">
+            <CheckCircle2 size={34} className="empty-icon" />
+            <h3>No findings yet</h3>
+            <p>Upload your sales or purchase registers and matching GST statements to start an analysis.</p>
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+              Upload records
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* 2. KPI Severity Cards */}
       <div className="kpi-grid">
         <KPICard
@@ -245,6 +238,8 @@ export function AnomaliesPage({ anomalies = [], mlMeta = null }) {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

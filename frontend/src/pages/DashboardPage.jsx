@@ -22,13 +22,13 @@ export function DashboardPage({
   onSelectInvoice,
   onNavigate,
   activeBusiness,
-  isSyntheticDemo,
 }) {
   const sales = data?.sales || [];
   const purchases = data?.purchases || [];
   const allRecords = [...sales, ...purchases];
 
-  const total = allRecords.length;
+  const comparisonCount = allRecords.length;
+  const invoiceRecordCount = Number(data?.summary?.invoice_record_count || 0);
   const matched = allRecords.filter((r) => r.status === "MATCH").length;
   const mismatched = allRecords.filter((r) => r.status === "MISMATCH").length;
   const missing = allRecords.filter((r) => r.status === "MISSING_IN_GST").length;
@@ -36,10 +36,10 @@ export function DashboardPage({
   const anomalyCount = anomalies?.length || 0;
 
   // Real calculations strictly derived from actual reconciliation data
-  const matchRate = total > 0 ? ((matched / total) * 100).toFixed(1) : "0.0";
-  const mismatchRate = total > 0 ? ((mismatched / total) * 100).toFixed(1) : "0.0";
-  const missingRate = total > 0 ? ((missing / total) * 100).toFixed(1) : "0.0";
-  const extraRate = total > 0 ? ((extra / total) * 100).toFixed(1) : "0.0";
+  const matchRate = comparisonCount > 0 ? ((matched / comparisonCount) * 100).toFixed(1) : null;
+  const mismatchRate = comparisonCount > 0 ? ((mismatched / comparisonCount) * 100).toFixed(1) : null;
+  const missingRate = comparisonCount > 0 ? ((missing / comparisonCount) * 100).toFixed(1) : null;
+  const extraRate = comparisonCount > 0 ? ((extra / comparisonCount) * 100).toFixed(1) : null;
 
   // Attention items: Mismatches, Missing, and Extra records
   const attentionItems = allRecords.filter(
@@ -55,17 +55,17 @@ export function DashboardPage({
     }).format(val);
   };
 
-  const businessName = activeBusiness?.name || data?.summary?.business_name || "Demo MSME Enterprise";
-  const businessGstin = activeBusiness?.gstin || data?.summary?.gstin || "29AAAAA1111A1Z5";
-  const taxPeriod = gstr3b?.tax_period || "2026-07";
+  const businessName = activeBusiness?.name || data?.summary?.business_name || "Business overview";
+  const businessGstin = activeBusiness?.gstin || data?.summary?.gstin || "—";
+  const taxPeriod = gstr3b?.data_available ? gstr3b.tax_period : null;
 
   // Pure SVG Donut Chart Geometry Calculations
   const radius = 54;
   const circumference = 2 * Math.PI * radius; // ~339.29
-  const matchLength = total > 0 ? (matched / total) * circumference : 0;
-  const mismatchLength = total > 0 ? (mismatched / total) * circumference : 0;
-  const missingLength = total > 0 ? (missing / total) * circumference : 0;
-  const extraLength = total > 0 ? (extra / total) * circumference : 0;
+  const matchLength = comparisonCount > 0 ? (matched / comparisonCount) * circumference : 0;
+  const mismatchLength = comparisonCount > 0 ? (mismatched / comparisonCount) * circumference : 0;
+  const missingLength = comparisonCount > 0 ? (missing / comparisonCount) * circumference : 0;
+  const extraLength = comparisonCount > 0 ? (extra / comparisonCount) * circumference : 0;
 
   const matchOffset = 0;
   const mismatchOffset = -matchLength;
@@ -79,9 +79,9 @@ export function DashboardPage({
         <div className="hero-content">
           <div className="hero-badge">
             <span className="hero-badge-dot"></span>
-            <span>{isSyntheticDemo ? "Simulation Sandbox • Demo GST Ledger" : "Active Enterprise • Registered Ledger"}</span>
+            <span>Business workspace</span>
           </div>
-          <h1 className="hero-title">{businessName}</h1>
+          <h2 className="hero-title">{businessName}</h2>
           <div className="hero-meta-row">
             <div className="hero-meta-item">
               <Building size={14} />
@@ -89,20 +89,20 @@ export function DashboardPage({
             </div>
             <div className="hero-meta-item">
               <Calendar size={14} />
-              <span>Period: <strong>{taxPeriod}</strong></span>
+              <span>Period: <strong>{taxPeriod || "Not available"}</strong></span>
             </div>
             <div className="hero-meta-item">
               <TrendingUp size={14} color="#10b981" />
-              <span>Health: <strong>{matchRate}%</strong></span>
+              <span>Health: <strong>{matchRate === null ? "No data available" : `${matchRate}%`}</strong></span>
             </div>
           </div>
         </div>
 
         <div className="hero-actions">
-          {total === 0 ? (
+          {invoiceRecordCount === 0 ? (
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-outline-light"
               onClick={() => onNavigate("upload")}
             >
               <UploadCloud size={14} />
@@ -127,16 +127,15 @@ export function DashboardPage({
           <h2 className="section-title">Reconciliation KPI Summary</h2>
           <p className="section-subtitle">Real-time matching status across company books and portal filings</p>
         </div>
-        <div className="section-badge">{total} Total Invoices</div>
       </div>
 
       {/* 6 Clean Fintech KPI Cards */}
       <div className="kpi-grid">
         <KPICard
-          title="TOTAL RECORDS"
-          value={total}
+          title="INVOICE RECORDS"
+          value={invoiceRecordCount}
           icon={FileText}
-          subtext="Sales & Purchase bills"
+          subtext="Saved business invoice records"
           iconBg="#eff6ff"
           iconColor="#2563eb"
           accentColor="#2563eb"
@@ -145,7 +144,7 @@ export function DashboardPage({
           title="MATCHED"
           value={matched}
           icon={CheckCircle2}
-          subtext={`${matchRate}% match rate`}
+          subtext={matchRate === null ? "No data available" : `${matchRate}% match rate`}
           iconBg="#ecfdf5"
           iconColor="#16a34a"
           accentColor="#16a34a"
@@ -154,7 +153,7 @@ export function DashboardPage({
           title="MISMATCHED"
           value={mismatched}
           icon={AlertCircle}
-          subtext={`${mismatchRate}% rate variance`}
+          subtext={mismatchRate === null ? "No data available" : `${mismatchRate}% of comparisons`}
           iconBg="#fef2f2"
           iconColor="#dc2626"
           accentColor="#dc2626"
@@ -189,7 +188,7 @@ export function DashboardPage({
       </div>
 
       {/* Empty State Banner if Business has 0 records */}
-      {total === 0 && (
+      {comparisonCount === 0 && (
         <div
           className="institutional-card"
           style={{
@@ -239,7 +238,7 @@ export function DashboardPage({
       )}
 
       {/* 3. GSTR-3B Summary Card (When Data Exists) */}
-      {total > 0 && gstr3b && (
+      {comparisonCount > 0 && gstr3b?.data_available && (
         <div className="gstr3b-statement-card">
           <div className="statement-header">
             <div>
@@ -282,7 +281,7 @@ export function DashboardPage({
       )}
 
       {/* 4. Two-Column Layout: Visual Health Chart + Attention Required */}
-      {total > 0 && (
+      {comparisonCount > 0 && (
         <div className="dashboard-dual-grid">
           {/* Left: Modern SVG Donut Chart + Health Distribution */}
           <div className="institutional-card">
@@ -489,36 +488,36 @@ export function DashboardPage({
         <div className="quick-actions-grid">
           <div className="quick-action-card" onClick={() => onNavigate("sales")}>
             <div className="action-icon-wrap" style={{ background: "#eff6ff", color: "#2563eb" }}>
-              <CheckCircle2 size={18} />
+              <CheckCircle2 size={20} />
             </div>
-            <h4>Reconcile Sales</h4>
+            <h3>Reconcile Sales</h3>
             <p>Match sales book with Form GSTR-1</p>
             <div className="action-arrow"><ArrowRight size={14} /></div>
           </div>
 
           <div className="quick-action-card" onClick={() => onNavigate("purchase")}>
             <div className="action-icon-wrap" style={{ background: "#ecfdf5", color: "#0d9488" }}>
-              <TrendingUp size={18} />
+              <TrendingUp size={20} />
             </div>
-            <h4>Reconcile Purchases</h4>
+            <h3>Reconcile Purchases</h3>
             <p>Compare purchase register with GSTR-2B</p>
             <div className="action-arrow"><ArrowRight size={14} /></div>
           </div>
 
           <div className="quick-action-card" onClick={() => onNavigate("anomalies")}>
             <div className="action-icon-wrap" style={{ background: "#fef2f2", color: "#dc2626" }}>
-              <ShieldAlert size={18} />
+              <ShieldAlert size={20} />
             </div>
-            <h4>Audit Exceptions</h4>
+            <h3>Audit Exceptions</h3>
             <p>Review ML outliers & flagged transactions</p>
             <div className="action-arrow"><ArrowRight size={14} /></div>
           </div>
 
           <div className="quick-action-card" onClick={() => onNavigate("reports")}>
             <div className="action-icon-wrap" style={{ background: "#f8fafc", color: "#0f172a" }}>
-              <BarChart3 size={18} />
+              <BarChart3 size={20} />
             </div>
-            <h4>Statutory Reports</h4>
+            <h3>Statutory Reports</h3>
             <p>Export reconciliation schedules & CSVs</p>
             <div className="action-arrow"><ArrowRight size={14} /></div>
           </div>
@@ -526,7 +525,7 @@ export function DashboardPage({
       </div>
 
       {/* 6. Recent Invoices Snapshot */}
-      {total > 0 && (
+      {comparisonCount > 0 && (
         <div className="institutional-card">
           <div className="card-header">
             <div>

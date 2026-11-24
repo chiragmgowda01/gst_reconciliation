@@ -24,7 +24,7 @@ const SeverityIcon = ({ sev }) => {
   return <Info size={14} color={severityColor.INFO.icon} />;
 };
 
-export function Gstr3bPage({ gstr3b, sales = [], purchases = [] }) {
+export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, activeBusiness }) {
   const [crossForm, setCrossForm] = useState(null);
   const [cfLoading, setCfLoading] = useState(true);
   const [cfError, setCfError] = useState("");
@@ -79,16 +79,19 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [] }) {
   const purchaseRegisterItc = purchases.reduce((acc, curr) => acc + (curr.gst_amount || 0), 0);
 
   const gstr3bData = gstr3b || crossForm?.gstr3b_summary;
+  const gstr3bSource = gstr3b?.source ?? crossForm?.gstr3b_source;
+  const businessName = activeBusiness?.name || gstr3b?.business_name || crossForm?.business_name;
 
-  if (!gstr3bData && !cfLoading) {
+  if (!cfLoading && (!gstr3bData || gstr3b?.data_available === false || crossForm?.gstr3b_data_available === false)) {
     return (
-      <div className="card">
+      <div className="institutional-card empty-state-card">
         <div className="empty-state">
           <FileText size={36} className="empty-icon" />
-          <p>No GSTR-3B summary data available for this business account.</p>
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4 }}>
-            Upload GSTR-3B data or contact support.
-          </p>
+          <h3>No GSTR-3B return uploaded</h3>
+          <p>Upload this business’s monthly return to review its declared tax and input tax credit summary.</p>
+          <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+            Upload return
+          </button>
         </div>
       </div>
     );
@@ -99,10 +102,40 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [] }) {
   const itcReversed = gstr3bData?.itc_reversed ?? 0;
   const netItc = gstr3bData?.net_itc ?? 0;
   const netTaxPayable = Math.max(0, outputTax - netItc);
-  const taxPeriod = gstr3b?.tax_period || crossForm?.tax_period || "2026-07";
+  const taxPeriod = gstr3b?.tax_period || crossForm?.tax_period || "—";
 
   return (
     <div className="animate-fade-in">
+      {gstr3bData && gstr3bSource === "demo_fixture" && (
+        <div
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            marginBottom: 16,
+            padding: "12px 14px",
+            border: "1px solid #fcd34d",
+            borderRadius: 8,
+            background: "#fffbeb",
+            color: "#92400e",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <AlertTriangle size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            <strong>Synthetic demonstration data.</strong> These figures come from a demo fixture and do not represent an actual filed GST return.
+          </span>
+        </div>
+      )}
+      {gstr3bData && gstr3bSource !== "database" && gstr3bSource !== "demo_fixture" && (
+        <div className="data-source-note" role="note">
+          <Info size={16} />
+          <span>Source information is unavailable for these figures. They have not been confirmed as a filed return or verified with GSTN.</span>
+        </div>
+      )}
+
       {/* 1. Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
@@ -111,15 +144,15 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [] }) {
             Monthly statutory return of outward supplies, input tax credit claimed, and net cash tax liability
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           <div className="period-badge">
             <Calendar size={13} />
             <span>Tax Period: <strong>{taxPeriod}</strong></span>
           </div>
-          {gstr3b?.business_id && (
+          {businessName && (
             <div className="period-badge">
               <Building size={13} />
-              <span>Business ID: <strong>{gstr3b.business_id}</strong></span>
+              <span>Business: <strong>{businessName}</strong></span>
             </div>
           )}
         </div>

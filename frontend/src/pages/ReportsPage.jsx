@@ -3,7 +3,6 @@ import {
   Download,
   FileSpreadsheet,
   CheckCircle2,
-  AlertTriangle,
   AlertCircle,
   ShieldCheck,
   FileText,
@@ -15,12 +14,12 @@ import { api } from "../api/client";
 import { KPICard } from "../components/KPICard";
 import { LoadingSkeleton } from "../components/LoadingSkeleton";
 
-export function ReportsPage() {
+export function ReportsPage({ onNavigate }) {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [purchaseSource, setPurchaseSource] = useState("gstr2a");
-  const [taxPeriod, setTaxPeriod] = useState("2026-07");
+  const [taxPeriod, setTaxPeriod] = useState("");
 
   const [downloadingId, setDownloadingId] = useState(null);
   const [downloadError, setDownloadError] = useState("");
@@ -178,58 +177,18 @@ export function ReportsPage() {
 
   return (
     <div className="animate-fade-in">
-      {/* Demo / Synthetic Data Mode Transparency Banner */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          padding: "10px 16px",
-          marginBottom: 16,
-          borderRadius: 8,
-          background: "#fffbeb",
-          border: "1px solid #fde68a",
-          color: "#92400e",
-          fontSize: 12.5,
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Info size={16} color="#d97706" />
-          <span>
-            <strong>DATA SOURCE TRANSPARENCY:</strong> Report exports are generated from{" "}
-            {summary?.is_synthetic_demo
-              ? "local synthetic demonstration files (DEMO MODE)"
-              : "active tenant database records"}.{" "}
-            Live GST Common Portal API integration is intentionally disconnected. GSTR-2A reflects imported supplier filing records; GSTR-2B reflects period static statements.
-          </span>
-        </div>
-        <span
-          style={{
-            fontWeight: 700,
-            fontSize: 11,
-            background: "#fef3c7",
-            padding: "2px 8px",
-            borderRadius: 4,
-            border: "1px solid #f59e0b",
-          }}
-        >
-          {summary?.is_synthetic_demo ? "DEMO / SYNTHETIC DATA" : "LOCAL TENANT DB"}
-        </span>
+      <div className="data-source-note" role="note">
+        <Info size={16} />
+        <span>Reports use records saved for this business. GST portal statements must be imported; live GSTN sync is not connected.</span>
       </div>
 
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
-          <h2 className="section-title">Statutory Audit & Export Reports Catalogue</h2>
+          <h2 className="section-title">Reports</h2>
           <p className="section-subtitle">
-            Export structured reconciliation schedules for Chartered Accountants, management review, and compliance records
+            Review reconciliation results or download a CSV schedule.
           </p>
-        </div>
-        <div className="section-badge">
-          <FileText size={13} />
-          <span>12 Standard Audit Schedules</span>
         </div>
       </div>
 
@@ -287,11 +246,11 @@ export function ReportsPage() {
       )}
 
       {/* 2. Top Summary Metrics Cards (derived from real API summary data) */}
-      {summary && (
+      {summary?.has_data ? (
         <div className="kpi-grid">
           <KPICard
             title="Reconciliation Health"
-            value={`${summary.audit_health_score ?? 0}%`}
+            value={`${summary.audit_health_score}%`}
             icon={ShieldCheck}
             subtext="Weighted reconciliation alignment score"
             iconBg="#ecfdf5"
@@ -300,7 +259,7 @@ export function ReportsPage() {
           />
           <KPICard
             title="Sales Match Rate"
-            value={`${summary.sales_summary?.match_rate_percentage ?? 0}%`}
+            value={`${summary.sales_summary.match_rate_percentage}%`}
             icon={CheckCircle2}
             subtext={`${summary.sales_summary?.matched ?? 0} of ${summary.sales_summary?.total_records ?? 0} outward verified`}
             iconBg="#eff6ff"
@@ -309,32 +268,34 @@ export function ReportsPage() {
           />
           <KPICard
             title="Purchase ITC Match Rate"
-            value={`${summary.purchase_summary?.match_rate_percentage ?? 0}%`}
+            value={`${summary.purchase_summary.match_rate_percentage}%`}
             icon={CheckCircle2}
             subtext={`${summary.purchase_summary?.matched ?? 0} of ${summary.purchase_summary?.total_records ?? 0} inward verified`}
             iconBg="#eff6ff"
             iconColor="#2563eb"
             accentColor="#2563eb"
           />
-          <KPICard
-            title="High Priority Exceptions"
-            value={summary.anomalies_summary?.high_risk ?? 0}
-            icon={AlertTriangle}
-            subtext="Requiring immediate review"
-            iconBg="#fef2f2"
-            iconColor="#dc2626"
-            accentColor="#dc2626"
-          />
         </div>
-      )}
+      ) : summary ? (
+        <div className="institutional-card empty-state-card">
+          <div className="empty-state">
+            <FileText size={34} className="empty-icon" />
+            <h3>No report data yet</h3>
+            <p>Upload your registers and import the GST statements you want to compare. Performance rates will appear after records are available.</p>
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+              Upload records
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* 3. Export Schedules List */}
       <div className="institutional-card">
         <div className="card-header" style={{ flexWrap: "wrap", gap: 12 }}>
           <div>
-            <h3 className="card-title">Available Export Schedules (12 Reports)</h3>
+            <h3 className="card-title">Available report templates (12)</h3>
             <p className="card-subtitle">
-              Click export to download formatted CSV schedules with full transaction metadata and difference calculations
+              Choose a schedule to download. It contains business records only when matching data has been uploaded or imported.
             </p>
           </div>
 

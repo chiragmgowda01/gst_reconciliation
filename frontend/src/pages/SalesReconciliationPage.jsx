@@ -2,7 +2,7 @@ import { ReconciliationTable } from "../components/ReconciliationTable";
 import { KPICard } from "../components/KPICard";
 import { CheckCircle2, AlertCircle, AlertTriangle, HelpCircle, FileText } from "lucide-react";
 
-export function SalesReconciliationPage({ sales = [], onSelectInvoice }) {
+export function SalesReconciliationPage({ sales = [], onSelectInvoice, onNavigate }) {
   const matched = sales.filter((s) => s.status === "MATCH").length;
   const mismatched = sales.filter((s) => s.status === "MISMATCH").length;
   const missing = sales.filter((s) => s.status === "MISSING_IN_GST").length;
@@ -17,12 +17,21 @@ export function SalesReconciliationPage({ sales = [], onSelectInvoice }) {
             Cross-matching internal sales bills against GSTR-1 outward supply portal returns
           </p>
         </div>
-        <div className="section-badge">
-          <FileText size={13} />
-          <span>{sales.length} Outward Invoices</span>
-        </div>
       </div>
 
+      {sales.length === 0 ? (
+        <div className="institutional-card empty-state-card">
+          <div className="empty-state">
+            <FileText size={34} className="empty-icon" />
+            <h3>No sales comparisons yet</h3>
+            <p>Upload a Sales Register and the matching GSTR-1 statement to reconcile outward supplies.</p>
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+              Upload registers
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
         <KPICard
           title="Total Outward Records"
@@ -77,6 +86,8 @@ export function SalesReconciliationPage({ sales = [], onSelectInvoice }) {
         records={sales}
         onSelectInvoice={onSelectInvoice}
       />
+        </>
+      )}
     </div>
   );
 }

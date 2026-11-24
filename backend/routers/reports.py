@@ -43,13 +43,7 @@ def get_business_reconciled_dfs(
         end_date = date(year, month, last_day)
 
     invoices = []
-    has_db_records = False
     try:
-        # Check if tenant has any invoices loaded at all
-        has_db_records = db.scalar(
-            select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
-        ) is not None
-
         query = select(Invoice).where(Invoice.business_id == current_business.id)
         if start_date and end_date:
             query = query.where(Invoice.invoice_date >= start_date, Invoice.invoice_date <= end_date)
@@ -102,42 +96,8 @@ def get_business_reconciled_dfs(
             purchase_df.loc[missing_mask, "reason"] = note_gstr2b
         return sales_df, purchase_df
 
-    # If the business has DB records but none matched the tax period filter: return empty DataFrames
-    if has_db_records:
-        empty_res = pd.DataFrame(columns=cols + [
-            "status", "expected_taxable_value", "actual_taxable_value",
-            "expected_gst_amount", "actual_gst_amount",
-            "taxable_value_diff", "gst_amount_diff", "explanation", "reason"
-        ])
-        return empty_res, empty_res.copy()
-
-    # Demo fallback ONLY for default tenant (business_id == 1) if no records uploaded yet
-    if current_business.id == 1:
-        sales_df = reconcile("sales_register.csv", "gstr1.csv")
-        purchase_file = "gstr2b.csv" if norm_ps == "gstr2b" else "gstr2a.csv"
-        purchase_df = reconcile("purchase_register.csv", purchase_file)
-
-        if norm_ps == "gstr2b" and not purchase_df.empty:
-            note_gstr2b = (
-                "Vendor invoice recorded in purchase register is missing in GSTR-2B. "
-                "Note: This does not automatically prove statutory ITC ineligibility; supplier may have filed after the 11th/13th cut-off date."
-            )
-            missing_mask = purchase_df["status"] == "MISSING_IN_GST"
-            purchase_df.loc[missing_mask, "explanation"] = note_gstr2b
-            purchase_df.loc[missing_mask, "reason"] = note_gstr2b
-
-        # Filter demo data by tax period if requested
-        if start_date and end_date:
-            if not sales_df.empty and "invoice_date" in sales_df.columns:
-                dt_s = pd.to_datetime(sales_df["invoice_date"], errors="coerce").dt.date
-                sales_df = sales_df[(dt_s >= start_date) & (dt_s <= end_date)]
-            if not purchase_df.empty and "invoice_date" in purchase_df.columns:
-                dt_p = pd.to_datetime(purchase_df["invoice_date"], errors="coerce").dt.date
-                purchase_df = purchase_df[(dt_p >= start_date) & (dt_p <= end_date)]
-
-        return sales_df, purchase_df
-
-    # Any other business with 0 records in DB returns empty DataFrames (strictly tenant-isolated)
+    # A business with no rows for this period has no reconciliation data.
+    # Synthetic fixtures are served only by the GST simulator, never metrics.
     empty_res = pd.DataFrame(columns=cols + [
         "status", "expected_taxable_value", "actual_taxable_value",
         "expected_gst_amount", "actual_gst_amount",
@@ -157,9 +117,15 @@ def get_reports_summary(
     if norm_ps not in {"gstr2a", "gstr2b"}:
         norm_ps = "gstr2a"
 
-    has_db_records = db.scalar(
-        select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
-    ) is not None
+    try:
+        has_db_records = db.scalar(
+            select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
+        ) is not None
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service unavailable. Report data cannot be retrieved.",
+        )
 
     sales_df, purchase_df = get_business_reconciled_dfs(
         current_business, db, purchase_source=norm_ps, tax_period=tax_period
@@ -175,7 +141,7 @@ def get_reports_summary(
         mismatched = int((df["status"] == "MISMATCH").sum()) if not df.empty else 0
         missing = int((df["status"] == "MISSING_IN_GST").sum()) if not df.empty else 0
         extra = int((df["status"] == "EXTRA_IN_GST").sum()) if not df.empty else 0
-        match_rate = round((matched / total * 100), 1) if total > 0 else 0.0
+        match_rate = round((matched / total * 100), 1) if total > 0 else None
 
         taxable_total = float(df["taxable_value"].dropna().sum()) if not df.empty else 0.0
         gst_total = float(df["gst_amount"].dropna().sum()) if not df.empty else 0.0
@@ -197,15 +163,17 @@ def get_reports_summary(
     total_combined = sales_stats["total_records"] + purchase_stats["total_records"]
     matched_combined = sales_stats["matched"] + purchase_stats["matched"]
 
-    data_source_mode = "LOCAL_DATABASE" if has_db_records else ("DEMO_SYNTHETIC" if current_business.id == 1 else "EMPTY_TENANT")
+    has_reconciliation_data = total_combined > 0
+    data_source_mode = "BUSINESS_DATABASE" if has_db_records else "EMPTY_BUSINESS"
 
     return {
         "business_id": current_business.id,
         "business_name": current_business.name,
         "purchase_source": norm_ps,
-        "tax_period": tax_period or "2026-07",
+        "tax_period": tax_period,
         "data_source_mode": data_source_mode,
-        "is_synthetic_demo": data_source_mode == "DEMO_SYNTHETIC",
+        "is_synthetic_demo": False,
+        "has_data": has_reconciliation_data,
         "live_portal_sync": False,
         "sales_summary": sales_stats,
         "purchase_summary": purchase_stats,
@@ -215,7 +183,8 @@ def get_reports_summary(
             "medium_risk": sum(1 for a in anomalies if a["severity"] == "MEDIUM"),
             "low_risk": sum(1 for a in anomalies if a["severity"] == "LOW"),
         },
-        "audit_health_score": round((matched_combined / max(1, total_combined)) * 100, 1) if total_combined > 0 else 0.0,
+        "audit_health_score": round((matched_combined / total_combined) * 100, 1) if has_reconciliation_data else None,
+        "audit_health_status": "available" if has_reconciliation_data else "no_data",
     }
 
 

@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { LoadingSkeleton } from "../components/LoadingSkeleton";
 import { ErrorState } from "../components/ErrorState";
 
-export function InvoicesPage({ onSelectInvoice }) {
+export function InvoicesPage({ onSelectInvoice, onNavigate }) {
   const [invoices, setInvoices] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -86,9 +86,9 @@ export function InvoicesPage({ onSelectInvoice }) {
               <Database size={18} />
             </div>
             <div>
-              <h3 className="card-title">Database Invoice Records</h3>
+              <h3 className="card-title">Invoices</h3>
               <p className="card-subtitle">
-                Centralized PostgreSQL/Supabase ledger across all uploaded registers and returns
+                Records saved for this business.
               </p>
             </div>
           </div>
@@ -170,7 +170,7 @@ export function InvoicesPage({ onSelectInvoice }) {
                   {invoices.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="empty-state">
-                        No invoice records found in database.
+                        No invoice records found for this business. Upload a register or import a statement to get started.
                       </td>
                     </tr>
                   ) : (
@@ -205,6 +205,14 @@ export function InvoicesPage({ onSelectInvoice }) {
                 </tbody>
               </table>
             </div>
+
+            {total === 0 && !search && !source && (
+              <div style={{ display: "flex", justifyContent: "center", padding: "0 16px 16px" }}>
+                <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+                  Upload records
+                </button>
+              </div>
+            )}
 
             {/* Pagination */}
             {totalPages > 1 && (

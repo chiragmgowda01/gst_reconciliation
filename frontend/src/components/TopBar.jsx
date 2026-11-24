@@ -14,7 +14,6 @@ export function TopBar({
   onBusinessAdded,
   onLogout,
   onToggleSidebar,
-  isSyntheticDemo = true,
 }) {
   const titles = {
     dashboard: {
@@ -82,17 +81,6 @@ export function TopBar({
         <div className="page-title-group">
           <div className="page-title-row">
             <h1>{current.title}</h1>
-            {isSyntheticDemo ? (
-              <div className="demo-mode-pill" title="Synthetic simulated GST transaction ledger">
-                <span className="demo-mode-dot" />
-                <span>Demo Data</span>
-              </div>
-            ) : (
-              <div className="live-mode-pill" title="Connected to live registered enterprise ledger">
-                <span className="live-mode-dot" />
-                <span>Live Data</span>
-              </div>
-            )}
           </div>
           <p>{current.subtitle}</p>
         </div>

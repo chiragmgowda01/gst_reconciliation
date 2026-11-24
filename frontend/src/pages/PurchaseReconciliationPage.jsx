@@ -5,6 +5,7 @@ import { CheckCircle2, AlertCircle, AlertTriangle, HelpCircle, FileText, Info } 
 export function PurchaseReconciliationPage({
   purchases = [],
   onSelectInvoice,
+  onNavigate,
   purchaseSource = "gstr2a",
   onSelectPurchaseSource,
 }) {
@@ -37,7 +38,7 @@ export function PurchaseReconciliationPage({
           <p className="section-subtitle">
             {is2B
               ? "Verifying Input Tax Credit (ITC) eligibility under Rule 36(4) against static auto-drafted statement"
-              : "Verifying inward supply invoices against dynamic supplier portal filings"}
+              : "Review supplier invoices using imported GSTR-2A records. Live GST Portal synchronization is not connected."}
           </p>
         </div>
 
@@ -82,10 +83,6 @@ export function PurchaseReconciliationPage({
             </button>
           </div>
 
-          <div className="section-badge">
-            <FileText size={13} />
-            <span>{purchases.length} Invoices</span>
-          </div>
         </div>
       </div>
 
@@ -115,13 +112,25 @@ export function PurchaseReconciliationPage({
             </span>
           ) : (
             <span>
-              <strong>Dynamic Verification:</strong> Form GSTR-2A reflects all supplier filings continuously as they are submitted.
-              Use GSTR-2A for ongoing vendor tracking, and GSTR-2B for final GSTR-3B Table 4(A) claim determination.
+              <strong>GSTR-2A:</strong> Review imported supplier filings for ongoing vendor tracking, and use GSTR-2B for final GSTR-3B Table 4(A) claim determination.
             </span>
           )}
         </div>
       </div>
 
+      {purchases.length === 0 ? (
+        <div className="institutional-card empty-state-card">
+          <div className="empty-state">
+            <FileText size={34} className="empty-icon" />
+            <h3>No purchase comparisons yet</h3>
+            <p>Upload a Purchase Register and the selected supplier statement to review inward supplies and input tax credit.</p>
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate?.("upload")}>
+              Upload registers
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* 2. KPI Cards */}
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
         <KPICard
@@ -178,6 +187,8 @@ export function PurchaseReconciliationPage({
         records={purchases}
         onSelectInvoice={onSelectInvoice}
       />
+      </>
+      )}
     </div>
   );
 }

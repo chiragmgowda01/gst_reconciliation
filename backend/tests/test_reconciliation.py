@@ -1,6 +1,21 @@
 import pandas as pd
 import pytest
-from reconciliation.reconcile import reconcile
+from reconciliation.reconcile import _extract_gstin, reconcile
+from services.anomaly_service import get_all_anomalies
+
+
+def test_gstin_extraction_skips_nan_and_uses_valid_alternate_field():
+    row = pd.Series({"gstin": float("nan"), "customer_gstin": "29ABCDE1234F1Z5"})
+    assert _extract_gstin(row) == "29ABCDE1234F1Z5"
+
+
+def test_gstin_extraction_returns_empty_for_missing_values():
+    row = pd.Series({"gstin": float("nan"), "customer_gstin": None, "supplier_gstin": " "})
+    assert _extract_gstin(row) == ""
+
+
+def test_anomaly_analysis_without_business_data_does_not_load_fixture_files():
+    assert get_all_anomalies() == []
 
 
 def test_reconciliation_match():

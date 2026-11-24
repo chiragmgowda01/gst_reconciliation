@@ -54,7 +54,7 @@ def _validate_tax_period(tax_period: Optional[str]):
 
 
 def _load_gstr3b_row(tax_period: Optional[str]):
-    """Load GSTR-3B CSV summary for the given period, or the first available row."""
+    """Load the requested fixture period; never substitute another period."""
     try:
         df = pd.read_csv(DATA / "gstr3b.csv")
         if df.empty:
@@ -63,6 +63,7 @@ def _load_gstr3b_row(tax_period: Optional[str]):
             match = df[df["tax_period"].astype(str) == tax_period.strip()]
             if not match.empty:
                 return match.iloc[0], tax_period.strip()
+            return None, None
         row = df.iloc[0]
         return row, str(row["tax_period"])
     except Exception:
@@ -78,7 +79,7 @@ def _is_demo_fallback_permitted(business_gstin: Optional[str]) -> bool:
     Requirements:
     1. Business GSTIN must match the known synthetic demo GSTIN (29AAAAA1111A1Z5). Never check numeric ID.
     2. In production mode (ENVIRONMENT=production or RENDER is set), fallback is disabled by default.
-       It is only permitted if DEMO_MODE or GST_API_DEMO_MODE is explicitly set to 'true'.
+       In production, it is only permitted if DEMO_MODE is explicitly set to 'true'.
     """
     if not business_gstin or business_gstin.strip().upper() != DEMO_MSME_GSTIN:
         return False
@@ -88,9 +89,8 @@ def _is_demo_fallback_permitted(business_gstin: Optional[str]) -> bool:
         or os.getenv("RENDER") is not None
     )
     demo_mode_env = os.getenv("DEMO_MODE", "").strip().lower() in ("true", "1", "yes")
-    gst_demo_mode = os.getenv("GST_API_DEMO_MODE", "").strip().lower() in ("true", "1", "yes")
 
-    if is_production and not (demo_mode_env or gst_demo_mode):
+    if is_production and not demo_mode_env:
         return False
 
     return True
@@ -173,8 +173,11 @@ def gstr3b_summary(
     """
     Returns GSTR-3B summary figures for the given tax period.
     Priority 1: Database table `gstr3b_returns`.
-    Priority 2: Fallback to synthetic CSV fixture for demo business (id == 1).
-    Other businesses return data_available=False if no database filing exists.
+    Priority 2: Read-only synthetic CSV fallback for the specifically designated demo GSTIN,
+    subject to the environment gate in _is_demo_fallback_permitted.
+
+    The response source is "database", "demo_fixture", or "none" so callers can
+    distinguish persisted returns from demonstration data and missing filings.
     """
     resolved_period_str, _, _ = _validate_tax_period(tax_period)
     record = _get_gstr3b_record(
@@ -186,7 +189,7 @@ def gstr3b_summary(
     resolved_period = (
         resolved_period_str
         or (record["tax_period"] if record else None)
-        or (tax_period.strip() if tax_period else "2026-07")
+        or (tax_period.strip() if tax_period else None)
     )
 
     if record is None:
@@ -199,6 +202,7 @@ def gstr3b_summary(
             "itc_reversed": 0.0,
             "net_itc": 0.0,
             "data_available": False,
+            "source": "none",
             "note": "No GSTR-3B filing data available for this business. Upload GSTR-3B CSV to enable analysis.",
         }
 
@@ -210,6 +214,7 @@ def gstr3b_summary(
         "itc_reversed": float(record["itc_reversed"]),
         "net_itc": float(record["net_itc"]),
         "data_available": True,
+        "source": record["source"],
     }
 
 
@@ -234,7 +239,7 @@ def gstr3b_cross_form(
 
     # Load GSTR-3B record (DB first, fallback to demo CSV only if safely permitted)
     record = _get_gstr3b_record(current_business.id, current_business.gstin, db, period_str)
-    resolved_period = period_str or (record["tax_period"] if record else "2026-07")
+    resolved_period = period_str or (record["tax_period"] if record else None)
 
     # Load DB invoice sums for this business
     try:
@@ -524,6 +529,7 @@ def gstr3b_cross_form(
         "business_id": current_business.id,
         "tax_period": resolved_period,
         "gstr3b_data_available": gstr3b_available,
+        "gstr3b_source": record["source"] if record else "none",
         "register_data_available": has_db_data,
         "gstr3b_summary": {
             "output_tax": gstr3b_output_tax,

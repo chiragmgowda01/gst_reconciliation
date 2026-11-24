@@ -62,20 +62,12 @@ def auth_context():
             db.add(biz2)
             db.flush()
 
-        demo_user = db.scalar(select(User).where(User.email == "default@gst.local")) or db.scalar(select(User).where(User.id == 1))
-        demo_biz = db.scalar(select(Business).where(Business.id == 1))
-        demo_token = create_access_token(demo_user.id, demo_user.email) if demo_user else None
-        demo_headers = {"Authorization": f"Bearer {demo_token}", "X-Business-ID": "1"} if demo_token else {}
-
         db.commit()
 
         token1 = create_access_token(user1.id, user1.email)
         token2 = create_access_token(user2.id, user2.email)
 
         return {
-            "demo_user": demo_user,
-            "demo_biz": demo_biz,
-            "demo_headers": demo_headers,
             "user1": user1,
             "biz1": biz1,
             "token1": token1,
@@ -113,7 +105,7 @@ def test_export_all_12_catalogue_reports(client, auth_context):
         "itc_eligibility_variance",
     ]
 
-    headers = auth_context["demo_headers"] or auth_context["headers1"]
+    headers = auth_context["headers1"]
     for rep in catalogue_reports:
         resp = client.get(f"/reports/export?report_type={rep}&purchase_source=gstr2a", headers=headers)
         assert resp.status_code == 200, f"Report {rep} failed with status {resp.status_code}: {resp.text}"
@@ -130,7 +122,7 @@ def test_export_all_12_catalogue_reports(client, auth_context):
 
 def test_export_backward_compatible_reports(client, auth_context):
     """Verify mismatches, missing, anomalies reports export successfully."""
-    headers = auth_context["demo_headers"] or auth_context["headers1"]
+    headers = auth_context["headers1"]
     for rep in ["mismatches", "missing", "anomalies"]:
         resp = client.get(f"/reports/export?report_type={rep}", headers=headers)
         assert resp.status_code == 200
@@ -140,7 +132,7 @@ def test_export_backward_compatible_reports(client, auth_context):
 
 def test_export_purchase_source_selection(client, auth_context):
     """Verify switching purchase_source between gstr2a and gstr2b reflects in filename and output."""
-    headers = auth_context["demo_headers"] or auth_context["headers1"]
+    headers = auth_context["headers1"]
 
     resp_2a = client.get("/reports/export?report_type=purchases&purchase_source=gstr2a", headers=headers)
     assert resp_2a.status_code == 200
@@ -153,15 +145,15 @@ def test_export_purchase_source_selection(client, auth_context):
 
 def test_export_tax_period_scoping_and_filename(client, auth_context):
     """Verify tax_period filters records and appends period suffix to filename."""
-    headers = auth_context["demo_headers"] or auth_context["headers1"]
+    headers = auth_context["headers1"]
 
-    # July 2026 (has demo data)
+    # Empty tenant remains empty for every period; demo fixtures are simulator-only.
     resp_jul = client.get("/reports/export?report_type=sales&tax_period=2026-07", headers=headers)
     assert resp_jul.status_code == 200
     assert "2026_07" in resp_jul.headers.get("content-disposition", "")
     df_jul = pd.read_csv(io.StringIO(resp_jul.text))
-    # Should contain records for demo business
-    assert len(df_jul) > 0
+    assert len(df_jul) == 0
+    assert not df_jul.astype(str).apply(lambda col: col.str.contains(r"S001|S002", regex=True)).any().any()
 
     # August 2026 (no records exist for this period)
     resp_aug = client.get("/reports/export?report_type=sales&tax_period=2026-08", headers=headers)
@@ -169,6 +161,30 @@ def test_export_tax_period_scoping_and_filename(client, auth_context):
     assert "2026_08" in resp_aug.headers.get("content-disposition", "")
     df_aug = pd.read_csv(io.StringIO(resp_aug.text))
     assert len(df_aug) == 0  # Zero rows in August
+
+
+def test_empty_business_summary_and_anomalies_do_not_use_demo_fixtures(client, auth_context):
+    headers = auth_context["headers1"]
+    summary = client.get("/reports/summary", headers=headers)
+    assert summary.status_code == 200
+    data = summary.json()
+    assert data["has_data"] is False
+    assert data["is_synthetic_demo"] is False
+    assert data["audit_health_score"] is None
+    assert data["audit_health_status"] == "no_data"
+    assert data["sales_summary"]["total_records"] == 0
+    assert data["purchase_summary"]["total_records"] == 0
+    assert data["anomalies_summary"]["total_exceptions"] == 0
+
+    anomalies = client.get("/anomalies", headers=headers)
+    assert anomalies.status_code == 200
+    assert anomalies.json()["counts"]["total"] == 0
+    assert anomalies.json()["items"] == []
+
+    exported = client.get("/reports/export?report_type=sales", headers=headers)
+    assert exported.status_code == 200
+    exported_rows = pd.read_csv(io.StringIO(exported.text))
+    assert exported_rows.empty
 
 
 def test_export_invalid_report_type_returns_400(client, auth_context):

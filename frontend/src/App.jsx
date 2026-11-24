@@ -207,12 +207,6 @@ export function App() {
   const sales = reconciliationData?.sales || [];
   const purchases = reconciliationData?.purchases || [];
 
-  // Determine if active workspace is using demo / synthetic GST seed data
-  const isSyntheticDemo =
-    !activeBusiness ||
-    activeBusiness.id === 1 ||
-    Boolean(reconciliationData?.summary?.is_synthetic_demo);
-
   return (
     <div className="app-container">
       {/* Mobile Drawer Backdrop */}
@@ -255,7 +249,6 @@ export function App() {
           onLogout={handleLogout}
           onToggleSidebar={handleToggleSidebar}
           isSidebarCollapsed={isSidebarCollapsed}
-          isSyntheticDemo={isSyntheticDemo}
         />
 
         <main className="page-content">
@@ -275,7 +268,6 @@ export function App() {
                   onSelectInvoice={setSelectedInvoice}
                   onNavigate={setCurrentTab}
                   activeBusiness={activeBusiness}
-                  isSyntheticDemo={isSyntheticDemo}
                 />
               )}
 
@@ -283,6 +275,7 @@ export function App() {
                 <SalesReconciliationPage
                   sales={sales}
                   onSelectInvoice={setSelectedInvoice}
+                  onNavigate={setCurrentTab}
                 />
               )}
 
@@ -290,6 +283,7 @@ export function App() {
                 <PurchaseReconciliationPage
                   purchases={purchases}
                   onSelectInvoice={setSelectedInvoice}
+                  onNavigate={setCurrentTab}
                   purchaseSource={purchaseSource}
                   onSelectPurchaseSource={handlePurchaseSourceChange}
                 />
@@ -300,6 +294,8 @@ export function App() {
                   gstr3b={gstr3b}
                   sales={sales}
                   purchases={purchases}
+                  onNavigate={setCurrentTab}
+                  activeBusiness={activeBusiness}
                 />
               )}
 
@@ -307,6 +303,7 @@ export function App() {
                 <AnomaliesPage
                   anomalies={anomalies}
                   mlMeta={mlMeta}
+                  onNavigate={setCurrentTab}
                 />
               )}
 
@@ -323,6 +320,7 @@ export function App() {
                 <InvoicesPage
                   key={activeBusiness?.id}
                   onSelectInvoice={setSelectedInvoice}
+                  onNavigate={setCurrentTab}
                 />
               )}
 
@@ -336,6 +334,7 @@ export function App() {
               {currentTab === "reports" && (
                 <ReportsPage
                   key={activeBusiness?.id}
+                  onNavigate={setCurrentTab}
                 />
               )}
 

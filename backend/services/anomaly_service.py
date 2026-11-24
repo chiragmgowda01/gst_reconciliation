@@ -1,10 +1,22 @@
 from typing import Any, Dict, List, Optional
+import pandas as pd
 from reconciliation.reconcile import reconcile
 from services.validation import validate_gstin
 
 
-def get_all_anomalies(sales_file: Any = "sales_register.csv", gstr1_file: Any = "gstr1.csv",
-                      purchase_file: Any = "purchase_register.csv", gstr2a_file: Any = "gstr2a.csv",
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def get_all_anomalies(sales_file: Any = None, gstr1_file: Any = None,
+                      purchase_file: Any = None, gstr2a_file: Any = None,
                       sales_df: Optional[Any] = None, purchase_df: Optional[Any] = None,
                       purchase_label: str = "GSTR-2A") -> List[Dict[str, Any]]:
     """
@@ -22,12 +34,14 @@ def get_all_anomalies(sales_file: Any = "sales_register.csv", gstr1_file: Any = 
 
     # Reconcile Sales (Sales Register vs GSTR-1)
     if sales_df is None:
-        sales_df = reconcile(sales_file, gstr1_file)
+        sales_df = reconcile(sales_file, gstr1_file) if sales_file is not None or gstr1_file is not None else pd.DataFrame()
     for _, row in sales_df.iterrows():
-        inv_no = str(row["invoice_no"])
+        inv_no = _clean_text(row.get("invoice_no"))
+        if not inv_no:
+            continue
         status = row["status"]
-        gstin = str(row.get("gstin") or "")
-        date = str(row.get("invoice_date") or "")
+        gstin = _clean_text(row.get("gstin"))
+        date = _clean_text(row.get("invoice_date"))
         tax_period = date[:7] if len(date) >= 7 and date[4] == "-" else None
         tv_diff = row.get("taxable_value_diff")
         gst_diff = row.get("gst_amount_diff")
@@ -164,12 +178,18 @@ def get_all_anomalies(sales_file: Any = "sales_register.csv", gstr1_file: Any = 
 
     # Reconcile Purchases (Purchase Register vs GSTR-2A or GSTR-2B)
     if purchase_df is None:
-        purchase_df = reconcile(purchase_file, gstr2a_file)
+        purchase_df = (
+            reconcile(purchase_file, gstr2a_file)
+            if purchase_file is not None or gstr2a_file is not None
+            else pd.DataFrame()
+        )
     for _, row in purchase_df.iterrows():
-        inv_no = str(row["invoice_no"])
+        inv_no = _clean_text(row.get("invoice_no"))
+        if not inv_no:
+            continue
         status = row["status"]
-        gstin = str(row.get("gstin") or "")
-        date = str(row.get("invoice_date") or "")
+        gstin = _clean_text(row.get("gstin"))
+        date = _clean_text(row.get("invoice_date"))
         tax_period = date[:7] if len(date) >= 7 and date[4] == "-" else None
         tv_diff = row.get("taxable_value_diff")
         gst_diff = row.get("gst_amount_diff")

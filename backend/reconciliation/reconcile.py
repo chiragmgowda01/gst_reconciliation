@@ -27,7 +27,18 @@ def _safe_float_or_none(val: Any) -> Optional[float]:
 
 def _extract_gstin(row) -> str:
     if hasattr(row, "get"):
-        return str(row.get("gstin") or row.get("customer_gstin") or row.get("supplier_gstin") or "").strip()
+        for field in ("gstin", "customer_gstin", "supplier_gstin", "counterparty_gstin"):
+            value = row.get(field)
+            if value is None:
+                continue
+            try:
+                if pd.isna(value):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            text = str(value).strip()
+            if text:
+                return text
     return ""
 
 

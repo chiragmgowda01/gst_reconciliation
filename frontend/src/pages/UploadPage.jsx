@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UploadCloud, AlertCircle, FileCheck, FileText, ArrowRight, ShieldCheck } from "lucide-react";
+import { UploadCloud, AlertCircle, FileCheck, FileText, ArrowRight } from "lucide-react";
 import { api } from "../api/client";
 
 export function UploadPage({ onUploadSuccess }) {
@@ -33,13 +33,13 @@ export function UploadPage({ onUploadSuccess }) {
       id: "gstr2a",
       title: "Form GSTR-2A",
       code: "Dynamic Filing",
-      desc: "Imported counterparty supplier filings reflecting in portal ITC register (Local demo statement — not a live API sync)",
+      desc: "Supplier filing records. Synthetic demo data only; no live GSTN sync.",
     },
     {
       id: "gstr2b",
       title: "Form GSTR-2B",
       code: "Static Auto-Drafted ITC",
-      desc: "Monthly static auto-drafted ITC statement for return filing under Rule 36(4) (Local demo statement)",
+      desc: "Synthetic monthly ITC statement for demo use; verify against official records.",
     },
     {
       id: "gstr3b",
@@ -99,15 +99,15 @@ export function UploadPage({ onUploadSuccess }) {
       {/* 1. Page Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
-          <h2 className="section-title">CSV Ledger Ingestion & Validation</h2>
+          <h2 className="section-title">Upload records</h2>
           <p className="section-subtitle">
-            Upload internal registers, supplier filing statements, and monthly summary returns to synchronize your database
+            Add this business’s registers and GST return data for reconciliation.
           </p>
         </div>
-        <div className="section-badge">
-          <ShieldCheck size={13} />
-          <span>Active Tenant Storage (Local Mode)</span>
-        </div>
+      </div>
+
+      <div className="data-source-note" role="note">
+        GSTR-2A and GSTR-2B examples are synthetic demo statements. They are not fetched from GSTN.
       </div>
 
       {/* 2. Main Upload Card */}

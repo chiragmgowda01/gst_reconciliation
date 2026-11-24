@@ -137,6 +137,7 @@ def run_reconciliation(
         "business_name": current_business.name,
         "gstin": current_business.gstin,
         "purchase_source": norm_purchase_source,
+        "invoice_record_count": len(invoices),
         "total_records": len(all_records),
         "matched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MATCH"),
         "mismatched": sum(1 for r in all_records if isinstance(r, dict) and r.get("status") == "MISMATCH"),

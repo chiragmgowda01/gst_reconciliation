@@ -14,7 +14,6 @@ import {
   ArrowDownLeft,
   Calendar,
   Layers,
-  Database,
   Info,
   Filter,
   UploadCloud,
@@ -296,20 +295,8 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
               <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-main)", margin: 0 }}>
-                GST Data Center — Local API Simulator
+                GST Data Center
               </h2>
-              <span
-                className="badge"
-                style={{
-                  backgroundColor: "#eff6ff",
-                  color: "#1d4ed8",
-                  border: "1px solid #bfdbfe",
-                  fontWeight: 700,
-                  fontSize: 11,
-                }}
-              >
-                DEMO MODE / SYNTHETIC DATA
-              </span>
               <span
                 className="badge"
                 style={{
@@ -320,14 +307,12 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                   fontSize: 11,
                 }}
               >
-                TWO-STAGE STAGING LEDGER
+                Preview before import
               </span>
             </div>
             <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
-              This environment simulates a connected <strong>GST Suvidha Provider (GSP)</strong> interface.
-              All returns are parsed directly from synthetic CSV fixtures in <code>data/*.csv</code>.
-              <strong> GET queries remain 100% read-only</strong>. To reconcile against internal accounting,
-              you can explicitly preview and import return records into your active business ledger.
+              This simulator shows synthetic CSV data and does not connect to GSTN or a GSP.
+              Browsing is read-only. Records are saved to the selected business only after you preview and confirm an import.
             </p>
           </div>
         </div>
@@ -404,20 +389,19 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
           gap: 20,
           marginBottom: 20,
         }}
       >
-        {/* PANEL 1: GST ADAPTER OPERATIONAL STATUS */}
+        {/* PANEL 1: GST SIMULATOR STATUS */}
         <div className="card" style={{ marginBottom: 0 }}>
           <div className="card-header" style={{ marginBottom: 14 }}>
             <div>
               <div className="card-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Database size={16} color="var(--primary-blue)" />
-                Simulator Operational Status
+                <Server size={16} color="var(--primary-blue)" />
+                GST Data Simulator
               </div>
-              <div className="card-subtitle">Local GSP Adapter runtime configuration</div>
             </div>
             <button
               type="button"
@@ -450,87 +434,53 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
             </div>
           ) : statusData ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, 1fr)",
-                  gap: 10,
-                  backgroundColor: "var(--bg-subtle)",
-                  padding: "12px 14px",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: 12,
-                }}
-              >
-                <div>
-                  <span style={{ color: "var(--text-muted)", display: "block" }}>Adapter Class:</span>
-                  <strong style={{ fontFamily: "var(--font-mono)", color: "var(--text-main)" }}>
-                    {statusData.adapter_type || "MockGstAdapter"}
-                  </strong>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)", display: "block" }}>Provider Engine:</span>
-                  <strong style={{ color: "var(--primary-blue)" }}>
-                    {String(statusData.provider || "mock").toUpperCase()}
-                  </strong>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)", display: "block" }}>Data Source:</span>
-                  <strong style={{ fontFamily: "var(--font-mono)", color: "var(--text-main)" }}>
-                    {statusData.data_source || "synthetic_csv"}
-                  </strong>
-                </div>
-                <div>
-                  <span style={{ color: "var(--text-muted)", display: "block" }}>Live Portal Link:</span>
-                  <span
-                    style={{
-                      color: "#b45309",
-                      fontWeight: 600,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    <ShieldAlert size={12} />
-                    {statusData.live_integration_status || "Not Configured"}
-                  </span>
-                </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#15803d", fontSize: 14 }}>
+                <CheckCircle2 size={17} />
+                <strong>Status: Available</strong>
               </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-main)" }}>
+                Synthetic demonstration records are available.
+              </p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
+                No live GST Portal connection is configured.
+              </p>
 
-              <div>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
-                  Available Seed Return Files:
-                </span>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  {(statusData.available_fixtures || ["gstr1.csv", "gstr2a.csv", "gstr2b.csv", "gstr3b.csv"]).map(
-                    (f) => (
-                      <span
-                        key={f}
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 11,
-                          backgroundColor: "#fff",
-                          border: "1px solid var(--border-color)",
-                          padding: "3px 8px",
-                          borderRadius: 4,
-                          color: "var(--text-main)",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <FileText size={11} color="var(--primary-blue)" />
-                        {f}
-                      </span>
-                    )
+              <details style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+                  Technical diagnostics
+                </summary>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))",
+                    gap: 10,
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    borderRadius: "var(--radius-sm)",
+                    backgroundColor: "var(--bg-subtle)",
+                    fontSize: 12,
+                  }}
+                >
+                  <div><span>Adapter class: </span><strong>{statusData.adapter_type || "Unknown"}</strong></div>
+                  <div><span>Provider: </span><strong>{String(statusData.provider || "unknown").toUpperCase()}</strong></div>
+                  <div><span>Data source: </span><strong>{statusData.data_source || "Unknown"}</strong></div>
+                  <div><span>Integration: </span><strong>{statusData.live_integration_status || "Unknown"}</strong></div>
+                  <div><span>Health: </span><strong>{statusData.healthcheck?.status || "Unknown"}</strong></div>
+                  {activeBusiness && (
+                    <div><span>Business: </span><strong>{activeBusiness.name}</strong></div>
                   )}
                 </div>
-              </div>
-
-              {activeBusiness && (
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", borderTop: "1px solid var(--border-subtle)", paddingTop: 8 }}>
-                  Active Business Context: <strong>{activeBusiness.name}</strong> (<code>{activeBusiness.gstin}</code>)
+                <div style={{ marginTop: 10 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)" }}>Available fixture files</span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                    {(statusData.available_fixtures || ["gstr1.csv", "gstr2a.csv", "gstr2b.csv", "gstr3b.csv"]).map((f) => (
+                      <span key={f} style={{ fontFamily: "var(--font-mono)", fontSize: 11, padding: "3px 8px", border: "1px solid var(--border-color)", borderRadius: 4 }}>
+                        <FileText size={11} style={{ marginRight: 4, verticalAlign: "-2px" }} />{f}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              )}
+              </details>
             </div>
           ) : null}
         </div>

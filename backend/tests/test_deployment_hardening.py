@@ -244,6 +244,7 @@ def test_gstr3b_tenant_isolation(client, multi_tenant_setup):
     data_biz2 = res_biz2.json()
     assert data_biz2["business_id"] == biz2.id
     assert data_biz2["data_available"] is False
+    assert data_biz2["source"] == "none"
     assert data_biz2["output_tax"] == 0.0
 
     # Business 2 uploads its own distinct GSTR-3B
@@ -265,6 +266,7 @@ def test_gstr3b_tenant_isolation(client, multi_tenant_setup):
     )
     assert res_biz2_after.status_code == 200
     assert res_biz2_after.json()["output_tax"] == 55555.0
+    assert res_biz2_after.json()["source"] == "database"
 
     # Check Business 1 still sees only its own data
     res_biz1_after = client.get(
@@ -273,6 +275,7 @@ def test_gstr3b_tenant_isolation(client, multi_tenant_setup):
     )
     assert res_biz1_after.status_code == 200
     assert res_biz1_after.json()["output_tax"] == 999999.0
+    assert res_biz1_after.json()["source"] == "database"
 
 
 def test_gstr3b_cross_form_uses_db_persistence(client, multi_tenant_setup):
@@ -413,11 +416,13 @@ def test_demo_gstin_fallback_controlled_by_environment(client, monkeypatch):
     # 1. In production mode without explicit DEMO_MODE, fallback must be disabled
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("DEMO_MODE", raising=False)
-    monkeypatch.delenv("GST_API_DEMO_MODE", raising=False)
+    monkeypatch.setenv("GST_API_DEMO_MODE", "true")
 
     res_prod = client.get("/gstr3b/summary?tax_period=2026-07", headers=headers)
     assert res_prod.status_code == 200
     assert res_prod.json()["data_available"] is False
+    assert res_prod.json()["source"] == "none"
+    assert res_prod.json()["output_tax"] == 0.0
 
     # 2. When DEMO_MODE=true is explicitly set in production, fallback is safely permitted
     monkeypatch.setenv("DEMO_MODE", "true")
@@ -425,6 +430,16 @@ def test_demo_gstin_fallback_controlled_by_environment(client, monkeypatch):
     assert res_demo.status_code == 200
     assert res_demo.json()["data_available"] is True
     assert res_demo.json()["output_tax"] == 143190.0
+    assert res_demo.json()["source"] == "demo_fixture"
+
+    # An unavailable requested period must not borrow another fixture period's figures.
+    res_missing_period = client.get("/gstr3b/summary?tax_period=2026-06", headers=headers)
+    assert res_missing_period.status_code == 200
+    missing_period_data = res_missing_period.json()
+    assert missing_period_data["tax_period"] == "2026-06"
+    assert missing_period_data["data_available"] is False
+    assert missing_period_data["source"] == "none"
+    assert missing_period_data["output_tax"] == 0.0
 
 
 def test_intra_batch_duplicate_identical_periods_deduplicated(client, multi_tenant_setup):
