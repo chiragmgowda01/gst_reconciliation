@@ -1,10 +1,14 @@
+"""Database configuration with strict production PostgreSQL requirements."""
+
 import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 logger = logging.getLogger(__name__)
 
@@ -14,61 +18,81 @@ if env_path.exists():
 else:
     load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-db_file = Path(__file__).resolve().parent / "gst_local.db"
-sqlite_url = f"sqlite:///{db_file.as_posix()}"
+
+def is_production_environment() -> bool:
+    """Render deployments and explicit production environments require PostgreSQL."""
+    environment = os.getenv("ENVIRONMENT", "").strip().lower()
+    return environment in {"production", "prod"} or "RENDER" in os.environ
 
 
 def _build_engine(url: str | None):
-    target_url = url or sqlite_url
-    if target_url.startswith("sqlite:///./") or target_url.strip() in (
-        "sqlite:///gst_local.db",
-        "sqlite:///:memory:",
-    ):
-        if not target_url.endswith(":memory:"):
-            target_url = sqlite_url
+    production = is_production_environment()
+    configured_url = (url or "").strip()
 
-    if target_url.startswith("postgresql://"):
-        target_url = target_url.replace("postgresql://", "postgresql+psycopg://", 1)
-
-    connect_args = {}
-    if target_url.startswith("sqlite"):
-        connect_args["check_same_thread"] = False
+    if not configured_url:
+        if production:
+            raise RuntimeError(
+                "DATABASE_URL is required in production and must point to PostgreSQL."
+            )
+        # Keep the established local-development default. Pytest overrides this
+        # with its dedicated in-memory URL in backend/tests/conftest.py.
+        db_file = Path(__file__).resolve().parent / "gst_local.db"
+        configured_url = f"sqlite:///{db_file.as_posix()}"
 
     try:
-        eng = create_engine(
-            target_url,
+        parsed_url = make_url(configured_url)
+        dialect_name = parsed_url.get_backend_name()
+        if production and dialect_name != "postgresql":
+            raise RuntimeError(
+                "Production DATABASE_URL must use PostgreSQL; SQLite and other databases are not allowed."
+            )
+
+        if dialect_name == "postgresql" and parsed_url.drivername == "postgresql":
+            parsed_url = parsed_url.set(drivername="postgresql+psycopg")
+
+        connect_args = {"check_same_thread": False} if dialect_name == "sqlite" else {}
+        pool_options = (
+            {"poolclass": StaticPool}
+            if dialect_name == "sqlite" and parsed_url.database in {None, "", ":memory:"}
+            else {}
+        )
+        engine = create_engine(
+            parsed_url,
             connect_args=connect_args,
             pool_pre_ping=True,
-            **({"pool_timeout": 3} if not target_url.startswith("sqlite") else {}),
+            **pool_options,
+            **({"pool_timeout": 3} if dialect_name == "postgresql" else {}),
         )
-        with eng.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return eng
-    except Exception as exc:
-        if not target_url.startswith("sqlite"):
-            logger.warning(
-                "Primary database (%s) unreachable: %s. Falling back to local SQLite at %s",
-                target_url.split("@")[-1] if "@" in target_url else target_url,
-                exc,
-                sqlite_url,
+
+        # Check both the URL-selected dialect and an actual connection before
+        # publishing the engine to application code.
+        if production and engine.dialect.name != "postgresql":
+            engine.dispose()
+            raise RuntimeError(
+                "Production database engine did not initialize with PostgreSQL."
             )
-            fallback_args = {"check_same_thread": False}
-            fallback_eng = create_engine(sqlite_url, connect_args=fallback_args)
-            return fallback_eng
-        raise exc
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return engine
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        # Never include the URL or driver exception text: either may contain
+        # usernames, passwords, hostnames, or query parameters.
+        logger.error("Database engine initialization failed (%s).", type(exc).__name__)
+        if production:
+            raise RuntimeError(
+                "Unable to initialize the required production PostgreSQL database. "
+                "Check DATABASE_URL and database availability."
+            ) from None
+        raise RuntimeError(
+            f"Unable to initialize the configured database ({type(exc).__name__})."
+        ) from None
 
 
+DATABASE_URL = os.getenv("DATABASE_URL")
 engine = _build_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-# Ensure schema is up to date whenever database is accessed
-try:
-    from models.base import Base
-    import models.models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
-except Exception as _init_exc:
-    logger.debug("Database metadata initialization skipped: %s", _init_exc)
 
 
 def get_db():

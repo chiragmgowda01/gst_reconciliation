@@ -19,7 +19,7 @@ for p in env_candidates:
         load_dotenv(p)
         break
 
-from database import engine, get_db
+from database import engine, get_db, is_production_environment
 from models import models
 from models.base import Base
 from routers.anomalies import router as anomalies_router
@@ -38,15 +38,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database schema safely during application lifespan startup
+    # Production must not start if schema initialization cannot reach the
+    # configured PostgreSQL database. No alternate database is selected.
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database schema verified and initialized.")
-    except Exception as _schema_exc:
-        logger.warning(
-            "Database schema initialisation skipped at startup: %s — using test/offline mode.",
-            _schema_exc,
-        )
+    except Exception as exc:
+        if is_production_environment():
+            logger.error("Production database schema initialization failed (%s).", type(exc).__name__)
+            raise RuntimeError(
+                "Production startup stopped because PostgreSQL schema initialization failed."
+            ) from None
+        logger.warning("Database schema initialization failed (%s).", type(exc).__name__)
     yield
 
 
@@ -133,10 +136,22 @@ def home():
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     try:
+        database_dialect = db.get_bind().dialect.name
+        if is_production_environment() and database_dialect != "postgresql":
+            logger.error("Health check rejected unexpected production database dialect (%s).", database_dialect)
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "status": "error",
+                    "database": "misconfigured",
+                    "detail": "Production requires the configured PostgreSQL database.",
+                },
+            )
         db.execute(text("SELECT 1"))
         return {
             "status": "ok",
             "database": "connected",
+            "database_dialect": database_dialect,
         }
     except Exception as exc:
         logger.error("Health check database failure: %s", type(exc).__name__)

@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, delete
+from sqlalchemy import select
 
 from main import app
 from database import SessionLocal
@@ -50,8 +50,6 @@ def auth_context():
             db.add(biz)
             db.flush()
 
-        # Clean existing invoices for this business
-        db.execute(delete(Invoice).where(Invoice.business_id == biz.id))
         db.commit()
 
         token = create_access_token(user.id, user.email)
