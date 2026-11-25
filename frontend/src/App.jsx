@@ -19,6 +19,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { GstApiPage } from "./pages/GstApiPage";
+import { ImportHistoryPage } from "./pages/ImportHistoryPage";
 
 export function App() {
   const [user, setUser] = useState(null);
@@ -228,9 +229,7 @@ export function App() {
         activeBusiness={activeBusiness}
         onLogout={handleLogout}
         isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         isMobileOpen={isMobileMenuOpen}
-        onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -328,6 +327,13 @@ export function App() {
                 <UploadPage
                   key={activeBusiness?.id}
                   onUploadSuccess={() => loadDashboardData(true)}
+                />
+              )}
+
+              {currentTab === "imports" && (
+                <ImportHistoryPage
+                  key={activeBusiness?.id}
+                  onDataChanged={() => loadDashboardData(true)}
                 />
               )}
 

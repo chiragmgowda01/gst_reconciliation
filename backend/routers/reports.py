@@ -44,7 +44,10 @@ def get_business_reconciled_dfs(
 
     invoices = []
     try:
-        query = select(Invoice).where(Invoice.business_id == current_business.id)
+        query = select(Invoice).where(
+            Invoice.business_id == current_business.id,
+            Invoice.deleted_at.is_(None),
+        )
         if start_date and end_date:
             query = query.where(Invoice.invoice_date >= start_date, Invoice.invoice_date <= end_date)
         invoices = db.scalars(query).all()
@@ -119,7 +122,10 @@ def get_reports_summary(
 
     try:
         has_db_records = db.scalar(
-            select(Invoice.id).where(Invoice.business_id == current_business.id).limit(1)
+            select(Invoice.id).where(
+                Invoice.business_id == current_business.id,
+                Invoice.deleted_at.is_(None),
+            ).limit(1)
         ) is not None
     except Exception:
         raise HTTPException(

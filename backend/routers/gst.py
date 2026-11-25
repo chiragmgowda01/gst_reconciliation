@@ -25,17 +25,26 @@ SAFETY GUARANTEES:
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.models import Business, Invoice
-from services.auth import get_current_business
-from services.validation import parse_date_safely, validate_invoice_row
+from models.models import Business, GSTR3BReturn, Invoice, User
+from services.auth import get_current_business, get_current_user
+from services.import_batch import (
+    add_gstr3b_batch_item,
+    add_invoice_batch_item,
+    complete_import_batch,
+    create_import_batch,
+    is_unique_constraint_violation,
+)
+from services.validation import parse_date_safely, validate_gstr3b_row, validate_invoice_row
 from sqlalchemy import select
 from services.gst_api_adapter import (
     MockGstAdapter,
@@ -88,6 +97,10 @@ class GstImportRequest(BaseModel):
     return_type: str = Field(..., description="Target return to import: gstr1, gstr2a, or gstr2b")
     tax_period: str = Field(..., description="Tax period in YYYY-MM format, e.g. 2026-07")
     counterparty_gstin: Optional[str] = Field(None, description="Optional counterparty GSTIN filter")
+
+
+class Gstr3bImportRequest(BaseModel):
+    tax_period: str = Field(..., description="Tax period in YYYY-MM format, e.g. 2026-07")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -386,6 +399,321 @@ def get_gstr3b(
     }
 
 
+def _fetch_gstr3b_fixture_summary(period: str, business: Business) -> Optional[dict[str, Any]]:
+    """Read and validate one exact-period synthetic GSTR-3B fixture summary."""
+    adapter = get_gst_adapter()
+    try:
+        fixture = adapter.get_gstr3b_summary(gstin=business.gstin, tax_period=period)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The synthetic GSTR-3B fixture is currently unavailable.",
+        ) from None
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The synthetic GSTR-3B fixture could not be validated.",
+        ) from None
+
+    if fixture.get("found") is not True:
+        return None
+    if fixture.get("data_source") != "synthetic_csv":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Only the configured synthetic GSTR-3B fixture can be imported here.",
+        )
+    if str(fixture.get("tax_period") or "").strip() != period:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The fixture returned a different tax period than requested.",
+        )
+
+    _, validation_errors = validate_gstr3b_row(
+        {
+            "tax_period": fixture.get("tax_period"),
+            "output_tax": fixture.get("output_tax"),
+            "eligible_itc": fixture.get("eligible_itc"),
+            "itc_reversed": fixture.get("itc_reversed"),
+        },
+        1,
+    )
+    values: dict[str, float] = {}
+    invalid_fields = set()
+    for field in ("output_tax", "eligible_itc", "itc_reversed", "net_itc"):
+        raw = fixture.get(field)
+        try:
+            numeric = float(str(raw).replace(",", ""))
+        except (TypeError, ValueError):
+            invalid_fields.add(field)
+            continue
+        if not math.isfinite(numeric) or (field != "net_itc" and numeric < 0):
+            invalid_fields.add(field)
+            continue
+        values[field] = numeric
+
+    if validation_errors or invalid_fields:
+        invalid_fields.update(
+            field
+            for field in ("output_tax", "eligible_itc", "itc_reversed")
+            if any(field in error for error in validation_errors)
+        )
+        fields = ", ".join(sorted(invalid_fields)) or "tax summary values"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"The synthetic GSTR-3B summary contains invalid values for: {fields}.",
+        )
+
+    return {"tax_period": period, **values}
+
+
+def _gstr3b_record_values(record: GSTR3BReturn) -> dict[str, Any]:
+    return {
+        "tax_period": record.tax_period,
+        "output_tax": float(record.output_tax),
+        "eligible_itc": float(record.eligible_itc),
+        "itc_reversed": float(record.itc_reversed),
+        "net_itc": float(record.net_itc),
+    }
+
+
+def _gstr3b_values_match(existing: dict[str, Any], fixture: dict[str, Any]) -> bool:
+    return all(
+        round(float(existing[field]), 2) == round(float(fixture[field]), 2)
+        for field in ("output_tax", "eligible_itc", "itc_reversed", "net_itc")
+    )
+
+
+def _gstr3b_import_no_data(period: str, business: Business) -> dict[str, Any]:
+    return {
+        "status": "no_data",
+        "operation": "no_data",
+        "tax_period": period,
+        "business_name": business.name,
+        "data_source": "synthetic_csv",
+        "fixture_summary": None,
+        "imported_count": 0,
+        "duplicate_count": 0,
+        "rejected_count": 0,
+        "message": f"No synthetic GSTR-3B fixture data is available for {period}. Nothing was saved.",
+    }
+
+
+@router.post("/gstr3b/import/preview", summary="Preview a synthetic GSTR-3B summary import")
+def preview_gstr3b_import(
+    payload: Gstr3bImportRequest,
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Validate a fixture summary and compare it with the tenant's saved period; never writes."""
+    period = _require_valid_period(payload.tax_period)
+    if business.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Business access is not authorized.")
+
+    fixture_values = _fetch_gstr3b_fixture_summary(period, business)
+    if fixture_values is None:
+        return _gstr3b_import_no_data(period, business)
+
+    record = db.scalar(
+        select(GSTR3BReturn).where(
+            GSTR3BReturn.business_id == business.id,
+            GSTR3BReturn.tax_period == period,
+        )
+    )
+    was_soft_deleted = record is not None and record.deleted_at is not None
+    existing_values = (
+        _gstr3b_record_values(record)
+        if record is not None and not was_soft_deleted
+        else None
+    )
+    if existing_values is None:
+        operation = "new_import"
+        differences = None
+        message = f"A new GSTR-3B summary will be saved for {period}."
+    elif _gstr3b_values_match(existing_values, fixture_values):
+        operation = "duplicate"
+        differences = {field: 0.0 for field in ("output_tax", "eligible_itc", "itc_reversed", "net_itc")}
+        message = f"The saved GSTR-3B summary for {period} already matches this fixture. No changes are needed."
+    else:
+        operation = "revision"
+        differences = {
+            field: round(fixture_values[field] - existing_values[field], 2)
+            for field in ("output_tax", "eligible_itc", "itc_reversed", "net_itc")
+        }
+        message = f"The saved GSTR-3B summary for {period} differs from the fixture and will be revised if confirmed."
+
+    return {
+        "status": "preview",
+        "operation": operation,
+        "tax_period": period,
+        "business_name": business.name,
+        "fixture_summary": fixture_values,
+        "existing_summary": existing_values,
+        "differences": differences,
+        "data_source": "synthetic_csv",
+        "fixture_identifier": "gstr3b.csv",
+        "message": message,
+        "disclaimer": "Synthetic demonstration data only. These figures do not represent an actual filed GST return.",
+    }
+
+
+@router.post("/gstr3b/import", summary="Confirm a synthetic GSTR-3B summary import")
+def confirm_gstr3b_import(
+    payload: Gstr3bImportRequest,
+    business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Refetch, validate, and transactionally save a confirmed monthly summary."""
+    period = _require_valid_period(payload.tax_period)
+    if business.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Business access is not authorized.")
+
+    fixture_values = _fetch_gstr3b_fixture_summary(period, business)
+    if fixture_values is None:
+        return _gstr3b_import_no_data(period, business)
+
+    record = db.scalar(
+        select(GSTR3BReturn)
+        .where(
+            GSTR3BReturn.business_id == business.id,
+            GSTR3BReturn.tax_period == period,
+        )
+        .with_for_update()
+    )
+    was_soft_deleted = record is not None and record.deleted_at is not None
+    existing_values = (
+        _gstr3b_record_values(record)
+        if record is not None and not was_soft_deleted
+        else None
+    )
+    if existing_values is not None and _gstr3b_values_match(existing_values, fixture_values):
+        return {
+            "status": "duplicate",
+            "operation": "duplicate",
+            "tax_period": period,
+            "business_name": business.name,
+            "imported_count": 0,
+            "duplicate_count": 1,
+            "rejected_count": 0,
+            "summary": existing_values,
+            "data_source": "database",
+            "provenance": "No changes were made; the existing record and its original import batch remain in place.",
+            "message": f"The saved GSTR-3B summary for {period} already matches. No revision or import batch was created.",
+        }
+
+    operation = "new_import" if record is None or was_soft_deleted else "revision"
+    try:
+        batch = create_import_batch(
+            db,
+            business_id=business.id,
+            imported_by_user_id=current_user.id,
+            source_category="gst_simulator",
+            source_type="gstr3b",
+            fixture_identifier="gstr3b.csv",
+            tax_period=period,
+            total_rows=1,
+        )
+
+        if record is None:
+            record = GSTR3BReturn(
+                business_id=business.id,
+                tax_period=period,
+                output_tax=fixture_values["output_tax"],
+                eligible_itc=fixture_values["eligible_itc"],
+                itc_reversed=fixture_values["itc_reversed"],
+                net_itc=fixture_values["net_itc"],
+                import_batch_id=batch.batch_id,
+            )
+            db.add(record)
+            db.flush()
+            add_gstr3b_batch_item(
+                db,
+                batch_id=batch.batch_id,
+                outcome="imported",
+                tax_period=period,
+                gstr3b_return_id=record.id,
+                new_values=fixture_values,
+            )
+        elif was_soft_deleted:
+            # Reuse the unique tenant-period row. The deleted batch remains in
+            # audit history, while this new import becomes its active owner.
+            record.output_tax = fixture_values["output_tax"]
+            record.eligible_itc = fixture_values["eligible_itc"]
+            record.itc_reversed = fixture_values["itc_reversed"]
+            record.net_itc = fixture_values["net_itc"]
+            record.deleted_at = None
+            record.import_batch_id = batch.batch_id
+            add_gstr3b_batch_item(
+                db,
+                batch_id=batch.batch_id,
+                outcome="imported",
+                tax_period=period,
+                gstr3b_return_id=record.id,
+                new_values=fixture_values,
+            )
+        else:
+            previous_values = existing_values
+            record.output_tax = fixture_values["output_tax"]
+            record.eligible_itc = fixture_values["eligible_itc"]
+            record.itc_reversed = fixture_values["itc_reversed"]
+            record.net_itc = fixture_values["net_itc"]
+            add_gstr3b_batch_item(
+                db,
+                batch_id=batch.batch_id,
+                outcome="revised",
+                tax_period=period,
+                gstr3b_return_id=record.id,
+                previous_values=previous_values,
+                new_values=fixture_values,
+            )
+
+        complete_import_batch(
+            batch,
+            imported_rows=0 if operation == "revision" else 1,
+            duplicate_rows=0,
+            revised_rows=1 if operation == "revision" else 0,
+            rejected_rows=0,
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if is_unique_constraint_violation(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A GSTR-3B summary for this business and period changed concurrently. Refresh the preview and retry.",
+            ) from None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The GSTR-3B import could not be saved. All changes were rolled back.",
+        ) from None
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The GSTR-3B import could not be saved. All changes were rolled back.",
+        ) from None
+
+    saved_values = _gstr3b_record_values(record)
+    return {
+        "status": "success",
+        "operation": operation,
+        "tax_period": period,
+        "business_name": business.name,
+        "import_batch_id": str(batch.batch_id),
+        "imported_count": 1,
+        "duplicate_count": 0,
+        "rejected_count": 0,
+        "summary": saved_values,
+        "data_source": "database",
+        "provenance": "Saved from synthetic fixture gstr3b.csv; this is not an actual filed GST return.",
+        "message": (
+            f"GSTR-3B summary for {period} was "
+            f"{'revised' if operation == 'revision' else 'saved'} in this business database."
+        ),
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # Helper: Fetch Source Records from Server Adapter
 # ─────────────────────────────────────────────────────────────
@@ -495,7 +823,8 @@ def preview_gst_import(
                 Invoice.invoice_no == inv_no,
                 Invoice.business_id == business.id,
                 Invoice.source == canonical_source,
-            )
+                Invoice.deleted_at.is_(None),
+            ).with_for_update()
         )
         if existing is not None:
             duplicate_records.append(row_dict)
@@ -549,6 +878,7 @@ def preview_gst_import(
 def execute_gst_import(
     payload: GstImportRequest,
     business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -562,34 +892,72 @@ def execute_gst_import(
     - Runs inside an atomic database transaction. Any failure rolls back completely.
     - Assigns business_id strictly from current_business.id (zero cross-tenant leakage).
 
-    *Note on Concurrency Limitation*:
-    Deduplication is currently enforced at the application level via SELECT queries
-    within the database transaction. Because the existing 'invoices' table schema
-    does not have a composite unique constraint on (invoice_no, business_id, source),
-    high-concurrency simultaneous parallel import requests could theoretically race.
+    A partial unique index on active invoice rows enforces the same business/source/
+    invoice-number key in the database, so concurrent imports cannot create duplicates.
     """
     period = _require_valid_period(payload.tax_period)
+    if business.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Business access is not authorized.")
     canonical_source, raw_records = _fetch_server_return_records(
         payload.return_type, period, payload.counterparty_gstin, business
     )
 
+    if not raw_records:
+        return {
+            "status": "no_data",
+            "return_type": canonical_source.upper(),
+            "source": canonical_source,
+            "tax_period": period,
+            "business_id": business.id,
+            "total_records": 0,
+            "imported_count": 0,
+            "duplicate_count": 0,
+            "rejected_count": 0,
+            "message": "No eligible fixture records were found for this return and period. Nothing was saved.",
+            "is_mock_data": True,
+            "data_source": "synthetic_csv",
+        }
+
     imported_count = 0
     duplicate_count = 0
     rejected_count = 0
-    seen_in_batch: set = set()
+    seen_in_batch: dict[tuple[str, str], Invoice] = {}
 
     try:
+        batch = create_import_batch(
+            db,
+            business_id=business.id,
+            imported_by_user_id=current_user.id,
+            source_category="gst_simulator",
+            source_type=canonical_source,
+            fixture_identifier=f"{canonical_source}.csv",
+            tax_period=period,
+            total_rows=len(raw_records),
+        )
+
         for idx, r in enumerate(raw_records):
             row_dict = dict(r)
-            is_valid, _ = validate_invoice_row(row_dict, idx + 1)
+            is_valid, validation_errors = validate_invoice_row(row_dict, idx + 1)
             if not is_valid:
                 rejected_count += 1
+                add_invoice_batch_item(
+                    db,
+                    batch_id=batch.batch_id,
+                    outcome="rejected",
+                    rejection_reason="; ".join(validation_errors) or "Row failed invoice validation.",
+                )
                 continue
 
             inv_no = str(row_dict.get("invoice_no") or "").strip()
             inv_date = parse_date_safely(row_dict.get("invoice_date"))
             if not inv_no or not inv_date:
                 rejected_count += 1
+                add_invoice_batch_item(
+                    db,
+                    batch_id=batch.batch_id,
+                    outcome="rejected",
+                    rejection_reason=f"Row {idx + 1}: Missing invoice number or invalid invoice date.",
+                )
                 continue
 
             try:
@@ -597,16 +965,28 @@ def execute_gst_import(
                 gst_amt = float(row_dict["gst_amount"])
             except (ValueError, KeyError, TypeError):
                 rejected_count += 1
+                add_invoice_batch_item(
+                    db,
+                    batch_id=batch.batch_id,
+                    outcome="rejected",
+                    rejection_reason=f"Row {idx + 1}: Invalid taxable value or GST amount.",
+                )
                 continue
 
             gstin = str(row_dict.get("gstin") or "").strip().upper()
 
             # Intra-batch duplicate check
             batch_key = (inv_no, canonical_source)
-            if batch_key in seen_in_batch:
+            earlier_record = seen_in_batch.get(batch_key)
+            if earlier_record is not None:
                 duplicate_count += 1
+                add_invoice_batch_item(
+                    db,
+                    batch_id=batch.batch_id,
+                    outcome="duplicate",
+                    invoice_id=earlier_record.id,
+                )
                 continue
-            seen_in_batch.add(batch_key)
 
             # Database duplicate check for active business
             existing = db.scalar(
@@ -614,10 +994,15 @@ def execute_gst_import(
                     Invoice.invoice_no == inv_no,
                     Invoice.business_id == business.id,
                     Invoice.source == canonical_source,
+                    Invoice.deleted_at.is_(None),
                 )
             )
             if existing is not None:
                 duplicate_count += 1
+                seen_in_batch[batch_key] = existing
+                add_invoice_batch_item(
+                    db, batch_id=batch.batch_id, outcome="duplicate", invoice_id=existing.id
+                )
                 continue
 
             invoice = Invoice(
@@ -628,34 +1013,76 @@ def execute_gst_import(
                 gst_amount=gst_amt,
                 source=canonical_source,
                 business_id=business.id,
+                import_batch_id=batch.batch_id,
             )
             db.add(invoice)
+            db.flush()
+            seen_in_batch[batch_key] = invoice
             imported_count += 1
+            add_invoice_batch_item(
+                db, batch_id=batch.batch_id, outcome="imported", invoice_id=invoice.id
+            )
 
+        complete_import_batch(
+            batch,
+            imported_rows=imported_count,
+            duplicate_rows=duplicate_count,
+            rejected_rows=rejected_count,
+        )
         db.commit()
-    except Exception as exc:
+    except IntegrityError as exc:
+        db.rollback()
+        if is_unique_constraint_violation(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A conflicting invoice was concurrently imported. Please refresh and retry.",
+            ) from None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database transaction failed during GST return import. The batch and invoice changes were rolled back.",
+        ) from None
+    except Exception:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database transaction failed during GST return import: {str(exc)}",
+            detail=(
+                "Database transaction failed during GST return import. "
+                "The batch and invoice changes were rolled back."
+            ),
+        )
+
+    if imported_count == 0 and duplicate_count == 0 and rejected_count > 0:
+        result_status = "failed"
+        result_message = (
+            f"No {canonical_source.upper()} records were imported for period {period}; "
+            f"all {rejected_count} record(s) were rejected. Rejection details are recorded in the import batch."
+        )
+    elif rejected_count:
+        result_status = "partial"
+        result_message = (
+            f"Imported {imported_count} {canonical_source.upper()} record(s) for period {period}; "
+            f"skipped {duplicate_count} duplicate(s) and rejected {rejected_count} record(s)."
+        )
+    else:
+        result_status = "success"
+        result_message = (
+            f"Imported {imported_count} {canonical_source.upper()} record(s) for period {period}; "
+            f"skipped {duplicate_count} duplicate(s)."
         )
 
     return {
-        "status": "success",
+        "status": result_status,
         "return_type": canonical_source.upper(),
         "source": canonical_source,
         "tax_period": period,
+        "import_batch_id": str(batch.batch_id),
         "business_id": business.id,
         "business_name": business.name,
         "total_records": len(raw_records),
         "imported_count": imported_count,
         "duplicate_count": duplicate_count,
         "rejected_count": rejected_count,
-        "message": (
-            f"Successfully imported {imported_count} {canonical_source.upper()} record(s) "
-            f"into the reconciliation ledger for period {period}. "
-            f"Skipped {duplicate_count} existing duplicate(s)."
-        ),
+        "message": result_message,
         "is_mock_data": True,
         "data_source": "synthetic_csv",
     }

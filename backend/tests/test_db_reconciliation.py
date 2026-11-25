@@ -2,7 +2,7 @@ import io
 from datetime import date
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -388,6 +388,10 @@ def test_duplicate_invoice_number_handling(client, db_session, setup_tenants):
 
     dup_no = "INV-DUP-SAFE-99"
 
+    # Simulate a legacy database that predates the active invoice uniqueness
+    # index. New schemas reject this state at the database level.
+    db_session.execute(text("DROP INDEX uq_invoices_active_business_source_invoice"))
+
     # Insert two records with the same invoice number in sales_register
     dup_1 = Invoice(
         invoice_no=dup_no,
@@ -506,6 +510,10 @@ def test_invalid_tax_periods_all_variants(client, setup_tenants):
 def test_duplicate_invoices_in_unilateral_sets_db(client, db_session, setup_tenants):
     biz_a = setup_tenants["biz_a"]
     token_a = setup_tenants["token_a"]
+
+    # Exercise reconciliation's legacy duplicate handling against a disposable
+    # pre-index schema; current active invoices are protected by the unique index.
+    db_session.execute(text("DROP INDEX uq_invoices_active_business_source_invoice"))
 
     # 2 duplicate records in books, 0 in GST
     inv_mis1 = Invoice(

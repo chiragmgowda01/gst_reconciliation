@@ -2351,3 +2351,62 @@
   color: var(--text-muted);
   line-height: 1.5;
 }
+.import-history-toolbar,
+.import-history-pagination,
+.import-history-actions,
+.import-history-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.import-history-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+}
+
+.import-history-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.import-history-toolbar select {
+  min-height: 36px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--text-main);
+}
+
+.import-history-check input,
+.import-history-confirm input { accent-color: var(--primary-blue); }
+
+.import-history-table-wrap { overflow-x: auto; }
+.import-history-table-wrap .data-table { min-width: 920px; }
+.import-history-actions { white-space: nowrap; }
+.import-history-pagination { justify-content: flex-end; padding: 14px; color: var(--text-muted); font-size: 13px; }
+.import-history-pagination span { margin: 0 6px; }
+.import-history-modal { width: min(680px, calc(100vw - 28px)); max-height: 90vh; overflow: auto; }
+.import-history-detail { padding: 18px 22px 22px; }
+.import-history-detail > p { margin: 0 0 11px; line-height: 1.5; }
+.import-history-items { margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 14px; }
+.import-history-items h3 { margin: 0 0 10px; font-size: 14px; }
+.import-history-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+.import-history-confirm { display: flex; align-items: flex-start; gap: 9px; margin: 18px 0; line-height: 1.45; }
+.import-history-modal-actions { justify-content: flex-end; margin-top: 20px; }
+.status-muted { opacity: .7; }
+
+@media (max-width: 640px) {
+  .import-history-toolbar { align-items: stretch; flex-direction: column; }
+  .import-history-toolbar label { justify-content: space-between; }
+  .import-history-toolbar select { flex: 1; max-width: 65%; }
+  .import-history-pagination { justify-content: center; }
+  .import-history-item { flex-direction: column; gap: 4px; }
+  .import-history-modal-actions { flex-direction: column-reverse; align-items: stretch; }
+  .import-history-modal-actions button { justify-content: center; }
+}

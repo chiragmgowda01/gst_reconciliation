@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from sqlalchemy import text
 
 
 _configured_database_url = os.getenv("DATABASE_URL", "").strip()
@@ -31,6 +32,21 @@ from models import models as _models  # noqa: E402,F401
 def isolated_application_database():
     """Give tests using the app's global session factory a fresh SQLite schema."""
     Base.metadata.create_all(bind=engine)
+    # The application lifespan now verifies that an Alembic revision is present.
+    # Tests still create their isolated schema directly from the registered ORM
+    # metadata, then mark that disposable schema at the current migration head.
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS alembic_version "
+                "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+            )
+        )
+        connection.execute(text("DELETE FROM alembic_version"))
+        connection.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+            {"revision": "0004_import_batch_rev_counts"},
+        )
 
     def override_get_db():
         session = SessionLocal()
