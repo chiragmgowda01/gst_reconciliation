@@ -474,10 +474,11 @@ def test_alembic_revision_identifiers_fit_varchar32_and_chain_is_valid():
 
     assert len(revision_ids) == len(set(revision_ids))
     assert all(len(rev_id) <= 32 for rev_id in revision_ids)
-    assert script_dir.get_heads() == ["0004_import_batch_rev_counts"]
+    assert script_dir.get_heads() == ["0005_runtime_role_security"]
     assert revision_ids == [
         "0001_core_schema",
         "0002_import_batch_management",
         "0003_active_invoice_uniqueness",
         "0004_import_batch_rev_counts",
+        "0005_runtime_role_security",
     ]

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
+import importlib.util
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from alembic import command
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
@@ -34,18 +37,26 @@ if os.getenv("RECONCILEPRO_PG_INTEGRATION") != "1":
 
 _DATABASE_URL = os.environ.get("RECONCILEPRO_TEST_DATABASE_URL", "")
 _url = make_url(_DATABASE_URL) if _DATABASE_URL else None
+_RUNTIME_DATABASE_URL = os.environ.get("APP_DATABASE_URL", "")
+_runtime_url = make_url(_RUNTIME_DATABASE_URL) if _RUNTIME_DATABASE_URL else None
 _run_id = os.getenv("RECONCILEPRO_PG_RUN_ID", "")
 if (
     _url is None
     or _url.drivername != "postgresql+psycopg"
     or _url.host not in {"127.0.0.1", "localhost"}
     or _url.port is None
-    or _url.username != "reconcilepro_test"
+    or _url.username != "postgres"
     or not _run_id
     or (_url.database or "") != f"reconcilepro_it_{_run_id}"
     or os.getenv("DATABASE_URL") != _DATABASE_URL
+    or _runtime_url is None
+    or _runtime_url.drivername != "postgresql+psycopg"
+    or _runtime_url.host not in {"127.0.0.1", "localhost"}
+    or _runtime_url.port != _url.port
+    or _runtime_url.username != "reconcilepro_app"
+    or _runtime_url.database != _url.database
 ):
-    raise RuntimeError("PostgreSQL integration tests require the runner's loopback-only disposable database.")
+    raise RuntimeError("PostgreSQL integration tests require the runner's separate loopback-only admin and runtime roles.")
 
 os.environ.setdefault("JWT_SECRET", "local-postgres-test-only-" + uuid4().hex)
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -54,10 +65,23 @@ sys.path.insert(0, str(BACKEND_DIR))
 from database import SessionLocal, engine as application_engine  # noqa: E402
 from main import app  # noqa: E402
 from migration_safety import PRODUCTION_MIGRATION_FLAG  # noqa: E402
+from models.base import Base  # noqa: E402
 from models.models import Business, GSTR3BReturn, ImportBatch, ImportBatchItem, Invoice, User  # noqa: E402
 from routers import gst as gst_routes  # noqa: E402
 from schema_parity import stamp_verified_legacy_baseline, verify_legacy_schema  # noqa: E402
 from services.auth import create_access_token, hash_password  # noqa: E402
+
+admin_engine = create_engine(_DATABASE_URL, poolclass=NullPool, hide_parameters=True)
+_security_migration_spec = importlib.util.spec_from_file_location(
+    "reconcilepro_runtime_role_migration",
+    BACKEND_DIR / "migrations" / "versions" / "0005_runtime_role_security.py",
+)
+assert _security_migration_spec and _security_migration_spec.loader
+runtime_role_migration = importlib.util.module_from_spec(_security_migration_spec)
+_security_migration_spec.loader.exec_module(runtime_role_migration)
+
+# Alembic registers this comparator while importing compare_metadata. The
+# final parity MigrationContext opts into it by name; do not register it again.
 
 
 def _alembic_config(connection=None, *, url=None, output_buffer=None):
@@ -118,7 +142,7 @@ def _legacy_models():
 
 def _new_legacy_schema():
     schema = "pgit_" + uuid4().hex[:20]
-    with application_engine.begin() as connection:
+    with admin_engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
 
     legacy_engine = create_engine(_DATABASE_URL, poolclass=NullPool)
@@ -160,14 +184,14 @@ def legacy_schema():
         yield schema, scoped_engine, models
     finally:
         scoped_engine.dispose()
-        with application_engine.begin() as connection:
+        with admin_engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
 
 
-def test_fresh_alembic_schema_is_at_revision_0004():
+def test_fresh_alembic_schema_is_at_revision_0005():
     with application_engine.connect() as connection:
         heads = set(MigrationContext.configure(connection).get_current_heads())
-        assert heads == {"0004_import_batch_rev_counts"}
+        assert heads == {"0005_runtime_role_security"}
         names = set(inspect(connection).get_table_names())
         assert {"users", "businesses", "invoices", "gstr3b_returns", "import_batches", "import_batch_items"} <= names
         invoice_indexes = inspect(connection).get_indexes("invoices")
@@ -181,6 +205,258 @@ def test_fresh_alembic_schema_is_at_revision_0004():
         assert "WHERE (deleted_at IS NULL)" in index_definition or "WHERE deleted_at IS NULL" in index_definition
         batch_columns = {c["name"]: c for c in inspect(connection).get_columns("import_batches")}
         assert batch_columns["revised_rows"]["default"] == "0"
+        _assert_final_schema_parity(connection)
+
+
+def test_runtime_and_data_api_roles_have_reviewed_effective_privileges():
+    app_tables = {
+        "users": {"SELECT", "INSERT", "UPDATE"},
+        "businesses": {"SELECT", "INSERT", "UPDATE"},
+        "invoices": {"SELECT", "INSERT", "UPDATE"},
+        "gstr3b_returns": {"SELECT", "INSERT", "UPDATE"},
+        "import_batches": {"SELECT", "INSERT", "UPDATE"},
+        "import_batch_items": {"SELECT", "INSERT"},
+        "alembic_version": {"SELECT"},
+    }
+    with application_engine.connect() as runtime_connection:
+        assert runtime_connection.execute(text("SELECT current_user, session_user")).one() == (
+            "reconcilepro_app", "reconcilepro_app"
+        )
+        for table_name in app_tables:
+            runtime_connection.execute(text(f'SELECT 1 FROM public."{table_name}" LIMIT 0'))
+
+    with admin_engine.connect() as connection:
+        server_version = int(connection.execute(text("SHOW server_version_num")).scalar_one()) // 10000
+        checked_table_privileges = (
+            ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN")
+            if server_version >= 17
+            else ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+        )
+        for table_name, allowed_privileges in app_tables.items():
+            for privilege in checked_table_privileges:
+                actual = connection.execute(text(
+                    "SELECT has_table_privilege('reconcilepro_app', :table_name, :privilege)"
+                ), {"table_name": f"public.{table_name}", "privilege": privilege}).scalar_one()
+                assert bool(actual) == (privilege in allowed_privileges), (table_name, privilege, actual)
+        for role in ("anon", "authenticated", "service_role"):
+            for table_name in ("import_batches", "import_batch_items"):
+                for privilege in checked_table_privileges:
+                    assert not connection.execute(text(
+                        "SELECT has_table_privilege(:role_name, :table_name, :privilege)"
+                    ), {"role_name": role, "table_name": f"public.{table_name}", "privilege": privilege}).scalar_one()
+
+            sequence_name = connection.execute(text(
+                "SELECT pg_get_serial_sequence('public.import_batch_items', 'id')"
+            )).scalar_one()
+            for privilege in ("USAGE", "SELECT", "UPDATE"):
+                assert not connection.execute(text(
+                    "SELECT has_sequence_privilege(:role_name, :sequence_name, :privilege)"
+                ), {"role_name": role, "sequence_name": sequence_name, "privilege": privilege}).scalar_one()
+
+        app_role = connection.execute(text(
+            "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, rolinherit "
+            "FROM pg_roles WHERE rolname = 'reconcilepro_app'"
+        )).one()
+        assert tuple(app_role) == (False, False, False, False, False, False)
+        assert not connection.execute(text(
+            "SELECT has_schema_privilege('reconcilepro_app', 'public', 'CREATE')"
+        )).scalar_one()
+        assert not connection.execute(text(
+            "SELECT has_database_privilege('reconcilepro_app', current_database(), 'CREATE')"
+        )).scalar_one()
+        assert not connection.execute(text(
+            "SELECT EXISTS (SELECT 1 FROM pg_auth_members WHERE member = 'reconcilepro_app'::regrole)"
+        )).scalar_one()
+
+        # Prove the default ACL policy on a table created by the migration
+        # owner, without retaining any test object in the disposable database.
+        probe_name = "pgit_default_acl_" + uuid4().hex[:16]
+        connection.exec_driver_sql(f'CREATE TABLE public."{probe_name}" (id SERIAL PRIMARY KEY)')
+        try:
+            for privilege in checked_table_privileges:
+                app_has = connection.execute(text(
+                    "SELECT has_table_privilege('reconcilepro_app', :table_name, :privilege)"
+                ), {"table_name": f"public.{probe_name}", "privilege": privilege}).scalar_one()
+                assert bool(app_has) == (privilege in {"SELECT", "INSERT"})
+                for role in ("anon", "authenticated", "service_role"):
+                    assert not connection.execute(text(
+                        "SELECT has_table_privilege(:role_name, :table_name, :privilege)"
+                    ), {"role_name": role, "table_name": f"public.{probe_name}", "privilege": privilege}).scalar_one()
+            probe_sequence = connection.execute(text(
+                "SELECT pg_get_serial_sequence(:table_name, 'id')"
+            ), {"table_name": f"public.{probe_name}"}).scalar_one()
+            for privilege in ("USAGE", "SELECT", "UPDATE"):
+                assert connection.execute(text(
+                    "SELECT has_sequence_privilege('reconcilepro_app', :sequence_name, :privilege)"
+                ), {"sequence_name": probe_sequence, "privilege": privilege}).scalar_one() == (
+                    privilege in {"USAGE", "SELECT"}
+                )
+                for role in ("anon", "authenticated", "service_role"):
+                    assert not connection.execute(text(
+                        "SELECT has_sequence_privilege(:role_name, :sequence_name, :privilege)"
+                    ), {"role_name": role, "sequence_name": probe_sequence, "privilege": privilege}).scalar_one()
+        finally:
+            connection.rollback()
+
+
+def test_data_api_role_membership_cannot_restore_import_table_privileges():
+    inherited_role = "pgit_reader_" + uuid4().hex[:16]
+    with admin_engine.connect() as connection:
+        connection.exec_driver_sql(f"CREATE ROLE {inherited_role} NOLOGIN")
+        connection.exec_driver_sql(f"GRANT SELECT ON TABLE public.import_batches TO {inherited_role}")
+        connection.exec_driver_sql(f"GRANT {inherited_role} TO authenticated")
+        connection.commit()
+        try:
+            with pytest.raises(RuntimeError, match="authenticated retains SELECT on public.import_batches"):
+                runtime_role_migration._verify_effective_privileges(connection)
+        finally:
+            connection.rollback()
+            with admin_engine.begin() as cleanup:
+                cleanup.exec_driver_sql(f"REVOKE {inherited_role} FROM authenticated")
+                cleanup.exec_driver_sql(f"REVOKE SELECT ON TABLE public.import_batches FROM {inherited_role}")
+                cleanup.exec_driver_sql(f"DROP ROLE {inherited_role}")
+
+
+def _assert_final_schema_parity(connection):
+    """Assert full migrated PostgreSQL schema parity with registered models."""
+    mismatches = []
+    inspector = inspect(connection)
+    expected_tables = set(Base.metadata.tables)
+    actual_tables = set(inspector.get_table_names(schema="public")) - {"alembic_version"}
+    for name in sorted(expected_tables - actual_tables):
+        mismatches.append(f"missing table public.{name}")
+    for name in sorted(actual_tables - expected_tables):
+        mismatches.append(f"unexpected table public.{name}")
+
+    # Alembic's PostgreSQL-aware comparator checks columns/types/lengths,
+    # nullability, server defaults, keys, foreign keys, unique constraints,
+    # indexes, and (through the opt-in plugin below) named CHECK definitions.
+    def compare_server_default(context, inspected_column, metadata_column, inspected_default,
+                               metadata_default, rendered_metadata_default):
+        # PostgreSQL SERIAL creates a nextval default for integer primary keys,
+        # while SQLAlchemy represents that behavior as autoincrement metadata.
+        if (
+            metadata_default is None
+            and metadata_column.primary_key
+            and isinstance(metadata_column.type, Integer)
+            and inspected_default
+            and "nextval(" in str(inspected_default).lower()
+        ):
+            return False
+        return None
+
+    context = MigrationContext.configure(connection, opts={
+        "compare_type": True,
+        "compare_server_default": compare_server_default,
+        "autogenerate_plugins": [
+            "alembic.autogenerate.*",
+            "alembic.ext.checkconstraint_byname",
+        ],
+    })
+    for difference in compare_metadata(context, Base.metadata):
+        mismatches.append(f"SQLAlchemy metadata difference: {difference!r}")
+
+    # Check primary keys and the presence of every named CHECK explicitly as
+    # well, yielding more direct diagnostics than the autogenerator diff.
+    for table_name in sorted(expected_tables & actual_tables):
+        expected_table = Base.metadata.tables[table_name]
+        expected_pk = tuple(column.name for column in expected_table.primary_key.columns)
+        actual_pk = tuple(
+            inspector.get_pk_constraint(table_name, schema="public").get("constrained_columns") or ()
+        )
+        if expected_pk != actual_pk:
+            mismatches.append(f"primary key public.{table_name}: expected {expected_pk!r}, got {actual_pk!r}")
+
+        expected_checks = {
+            constraint.name for constraint in expected_table.constraints
+            if constraint.__class__.__name__ == "CheckConstraint"
+        }
+        actual_check_rows = inspector.get_check_constraints(table_name, schema="public")
+        actual_checks = {row.get("name") for row in actual_check_rows}
+        if expected_checks != actual_checks:
+            mismatches.append(
+                f"check constraints public.{table_name}: expected {expected_checks!r}, got {actual_checks!r}"
+            )
+        for row in actual_check_rows:
+            if not row.get("sqltext"):
+                mismatches.append(f"check constraint public.{table_name}.{row.get('name')}: definition unavailable")
+
+    # The partial unique index predicate is a critical business invariant and
+    # is checked from PostgreSQL's own index definition, not only its name.
+    partial_index = connection.execute(text("""
+        SELECT indexdef FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'uq_invoices_active_business_source_invoice'
+    """)).scalar_one_or_none()
+    if not partial_index:
+        mismatches.append("index public.uq_invoices_active_business_source_invoice: missing")
+    elif not re.search(r"WHERE\s*\(?\s*deleted_at\s+IS\s+NULL\s*\)?\s*$", partial_index, re.IGNORECASE):
+        mismatches.append(
+            "index public.uq_invoices_active_business_source_invoice predicate: "
+            f"expected deleted_at IS NULL, got {partial_index!r}"
+        )
+
+    # Every integer autoincrement primary key must have its own correctly
+    # configured sequence; inspect catalog state without advancing it.
+    preparer = connection.dialect.identifier_preparer
+    for table_name in sorted(expected_tables & actual_tables):
+        table = Base.metadata.tables[table_name]
+        for column in table.primary_key.columns:
+            if not isinstance(column.type, Integer) or column.autoincrement is False:
+                continue
+            sequence_name = connection.execute(
+                text("SELECT pg_get_serial_sequence(:table_name, :column_name)"),
+                {"table_name": f"public.{table_name}", "column_name": column.name},
+            ).scalar_one_or_none()
+            if not sequence_name:
+                mismatches.append(f"sequence public.{table_name}.{column.name}: owned sequence missing")
+                continue
+            sequence = connection.execute(text("""
+                SELECT seq.seqincrement, seq.seqmin, seq.seqmax, seq.seqstart, seq.seqcache, seq.seqcycle,
+                       owner_table.relname AS owner_table, owner_column.attname AS owner_column,
+                       sequence_schema.nspname AS sequence_schema, sequence_rel.relname AS sequence_name
+                FROM pg_class AS sequence_rel
+                JOIN pg_namespace AS sequence_schema ON sequence_schema.oid = sequence_rel.relnamespace
+                JOIN pg_sequence AS seq ON seq.seqrelid = sequence_rel.oid
+                LEFT JOIN pg_depend AS dependency
+                  ON dependency.objid = sequence_rel.oid AND dependency.deptype IN ('a', 'i')
+                LEFT JOIN pg_class AS owner_table ON owner_table.oid = dependency.refobjid
+                LEFT JOIN pg_attribute AS owner_column
+                  ON owner_column.attrelid = dependency.refobjid AND owner_column.attnum = dependency.refobjsubid
+                WHERE sequence_rel.oid = to_regclass(:sequence_name)
+            """), {"sequence_name": sequence_name}).mappings().one_or_none()
+            if sequence is None:
+                mismatches.append(f"sequence {sequence_name}: catalog configuration missing")
+                continue
+            owner = (sequence["owner_table"], sequence["owner_column"])
+            if owner != (table_name, column.name):
+                mismatches.append(
+                    f"sequence {sequence_name} ownership: expected {(table_name, column.name)!r}, got {owner!r}"
+                )
+            configuration = (
+                sequence["seqincrement"], sequence["seqmin"], sequence["seqmax"],
+                sequence["seqstart"], sequence["seqcache"], bool(sequence["seqcycle"]),
+            )
+            expected_configuration = (1, 1, 2147483647, 1, 1, False)
+            if configuration != expected_configuration:
+                mismatches.append(
+                    f"sequence {sequence_name} configuration: expected {expected_configuration!r}, got {configuration!r}"
+                )
+            quoted_sequence = (
+                f"{preparer.quote_schema(sequence['sequence_schema'])}."
+                f"{preparer.quote(sequence['sequence_name'])}"
+            )
+            state = connection.execute(text(f"SELECT last_value, is_called FROM {quoted_sequence}")).one()
+            maximum_id = connection.execute(text(
+                f"SELECT max({preparer.quote(column.name)}) FROM public.{preparer.quote(table_name)}"
+            )).scalar_one()
+            next_value = state.last_value + sequence["seqincrement"] if state.is_called else state.last_value
+            if maximum_id is not None and next_value <= maximum_id:
+                mismatches.append(
+                    f"sequence {sequence_name} state: next value {next_value} does not exceed max ID {maximum_id}"
+                )
+
+    assert not mismatches, "Final PostgreSQL schema parity failed:\n- " + "\n- ".join(mismatches)
 
 
 def test_independent_legacy_schema_parity_stamp_upgrade_preserves_rows(legacy_schema):
@@ -191,7 +467,11 @@ def test_independent_legacy_schema_parity_stamp_upgrade_preserves_rows(legacy_sc
         stamp_verified_legacy_baseline(connection)
         connection.commit()
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0001_core_schema"
-        command.upgrade(_alembic_config(connection), "head")
+        # The legacy object is isolated in a private test schema. Revisions
+        # 0002–0004 operate through its search_path; revision 0005 is separately
+        # exercised against the runner's application schema (public), where it
+        # hardens the Supabase/Postgres role ACLs.
+        command.upgrade(_alembic_config(connection), "0004_import_batch_rev_counts")
         connection.commit()
         assert set(MigrationContext.configure(connection).get_current_heads()) == {"0004_import_batch_rev_counts"}
         assert connection.execute(text("SELECT COUNT(*) FROM users")).scalar_one() == 1
@@ -253,7 +533,11 @@ def test_active_invoice_duplicates_abort_revision_0003_without_data_loss(legacy_
         # The migration chain must not claim that the failed uniqueness
         # migration, or a later revision, was applied.
         current_revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current_revision not in {"0003_active_invoice_uniqueness", "0004_import_batch_rev_counts"}
+        assert current_revision not in {
+            "0003_active_invoice_uniqueness",
+            "0004_import_batch_rev_counts",
+            "0005_runtime_role_security",
+        }
 
 
 @pytest.mark.parametrize(
@@ -306,17 +590,28 @@ def test_sequence_safety_detects_collision_without_advancing_sequence(legacy_sch
 
 
 def test_production_online_authorization_is_enforced(monkeypatch):
-    with application_engine.connect() as connection:
+    with admin_engine.connect() as connection:
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.delenv("RENDER", raising=False)
         monkeypatch.delenv(PRODUCTION_MIGRATION_FLAG, raising=False)
         with pytest.raises(RuntimeError, match="explicit RECONCILEPRO_ALLOW_PRODUCTION_MIGRATION=true"):
             command.upgrade(_alembic_config(connection), "head")
-        assert set(MigrationContext.configure(connection).get_current_heads()) == {"0004_import_batch_rev_counts"}
+        assert set(MigrationContext.configure(connection).get_current_heads()) == {"0005_runtime_role_security"}
 
         monkeypatch.setenv(PRODUCTION_MIGRATION_FLAG, "true")
         command.upgrade(_alembic_config(connection), "head")
-        assert set(MigrationContext.configure(connection).get_current_heads()) == {"0004_import_batch_rev_counts"}
+        assert set(MigrationContext.configure(connection).get_current_heads()) == {"0005_runtime_role_security"}
+
+
+def test_security_revision_downgrade_is_refused_without_weakening_privileges():
+    with admin_engine.connect() as connection:
+        with pytest.raises(RuntimeError, match="cannot be automatically downgraded"):
+            command.downgrade(_alembic_config(connection), "0004_import_batch_rev_counts")
+        assert set(MigrationContext.configure(connection).get_current_heads()) == {"0005_runtime_role_security"}
+        for role in ("anon", "authenticated", "service_role"):
+            assert not connection.execute(text(
+                "SELECT has_table_privilege(:role_name, 'public.import_batches', 'SELECT')"
+            ), {"role_name": role}).scalar_one()
 
 
 def test_production_offline_authorization_and_development_generation(monkeypatch):
@@ -427,7 +722,7 @@ def test_postgres_import_failure_rolls_back_invoice_batch_and_items():
     filename = f"rollback-{marker}.csv"
     function_name = f"pgit_fail_batch_item_{marker[:16]}"
     trigger_name = f"pgit_fail_item_{marker[:16]}"
-    with application_engine.begin() as connection:
+    with admin_engine.begin() as connection:
         connection.execute(text(
             f"CREATE FUNCTION public.{function_name}() RETURNS trigger LANGUAGE plpgsql AS "
             f"'BEGIN IF EXISTS (SELECT 1 FROM invoices WHERE id = NEW.invoice_id "
@@ -458,7 +753,7 @@ def test_postgres_import_failure_rolls_back_invoice_batch_and_items():
             assert db.scalar(select(ImportBatch.batch_id).where(ImportBatch.business_id == context["business_id"], ImportBatch.original_filename == filename)) is None
             assert db.scalar(select(ImportBatchItem.id).join(ImportBatch).where(ImportBatch.business_id == context["business_id"], ImportBatch.original_filename == filename)) is None
     finally:
-        with application_engine.begin() as connection:
+        with admin_engine.begin() as connection:
             connection.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name} ON import_batch_items"))
             connection.execute(text(f"DROP FUNCTION IF EXISTS public.{function_name}()"))
 
@@ -477,7 +772,7 @@ def test_postgres_gstr3b_import_failure_rolls_back_batch_item_and_return(monkeyp
     function_name = f"pgit_fail_gstr3b_item_{marker[:14]}"
     trigger_name = f"pgit_fail_gstr3b_{marker[:14]}"
     monkeypatch.setattr(gst_routes, "_fetch_gstr3b_fixture_summary", lambda _period, _business: fixture_values)
-    with application_engine.begin() as connection:
+    with admin_engine.begin() as connection:
         connection.execute(text(
             f"CREATE FUNCTION public.{function_name}() RETURNS trigger LANGUAGE plpgsql AS "
             f"'BEGIN RAISE EXCEPTION ''intentional disposable integration failure''; END;'"
@@ -506,7 +801,7 @@ def test_postgres_gstr3b_import_failure_rolls_back_batch_item_and_return(monkeyp
             )) is None
             assert db.scalar(select(Invoice.id).where(Invoice.business_id == context["business_id"], Invoice.invoice_no == period)) is None
     finally:
-        with application_engine.begin() as connection:
+        with admin_engine.begin() as connection:
             connection.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name} ON import_batch_items"))
             connection.execute(text(f"DROP FUNCTION IF EXISTS public.{function_name}()"))
 

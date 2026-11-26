@@ -7,13 +7,17 @@ from sqlalchemy import text
 
 
 _configured_database_url = os.getenv("DATABASE_URL", "").strip()
+_configured_app_database_url = os.getenv("APP_DATABASE_URL", "").strip()
 _is_render = "RENDER" in os.environ
 _is_production = os.getenv("ENVIRONMENT", "").strip().lower() in {"production", "prod"}
 
 # Refuse to run if the process appears configured for a hosted or PostgreSQL
 # database. Do not print the URL: it may contain credentials.
-if _is_render or _is_production or _configured_database_url.lower().startswith(
-    ("postgres",)
+if (
+    _is_render
+    or _is_production
+    or _configured_database_url.lower().startswith(("postgres",))
+    or _configured_app_database_url.lower().startswith(("postgres",))
 ):
     raise pytest.UsageError(
         "Backend tests refused to start: production/hosted or PostgreSQL database configuration detected."
@@ -21,6 +25,7 @@ if _is_render or _is_production or _configured_database_url.lower().startswith(
 
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+os.environ["APP_DATABASE_URL"] = "sqlite:///:memory:"
 
 from database import SessionLocal, engine, get_db  # noqa: E402
 from main import app  # noqa: E402
@@ -45,7 +50,7 @@ def isolated_application_database():
         connection.execute(text("DELETE FROM alembic_version"))
         connection.execute(
             text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
-            {"revision": "0004_import_batch_rev_counts"},
+            {"revision": "0005_runtime_role_security"},
         )
 
     def override_get_db():

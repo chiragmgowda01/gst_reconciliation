@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+    [ValidateSet('16', '17.12')]
+    [string]$PostgresVersion = '16'
+)
 
 $ErrorActionPreference = 'Stop'
 $dockerExe = (Get-Command docker -ErrorAction SilentlyContinue).Source
@@ -12,6 +15,8 @@ if (-not $dockerExe -or -not (Test-Path -LiteralPath $dockerExe)) {
 }
 $script:validatedDockerContext = $null
 $script:dockerExecutable = $dockerExe
+$postgresImage = if ($PostgresVersion -eq '16') { 'postgres:16-alpine' } else { 'postgres:17.12' }
+$expectedServerVersionPattern = if ($PostgresVersion -eq '16') { '^16\.' } else { '^17\.12(?:\s|$)' }
 
 function ConvertTo-WindowsArgument([string]$Value) {
     if ($Value.Length -eq 0) { return '""' }
@@ -45,7 +50,8 @@ function Invoke-LocalProcess {
     # interactive PowerShell process that launched this script.
     foreach ($key in @(
         'RENDER', 'DATABASE_URL', 'JWT_SECRET', 'ENVIRONMENT', 'PYTHON_DOTENV_DISABLED',
-        'RECONCILEPRO_TEST_DATABASE_URL', 'RECONCILEPRO_ALLOW_PRODUCTION_MIGRATION',
+        'APP_DATABASE_URL', 'RECONCILEPRO_TEST_DATABASE_URL', 'RECONCILEPRO_TEST_RUNTIME_PASSWORD',
+        'RECONCILEPRO_ALLOW_PRODUCTION_MIGRATION',
         'SUPABASE_URL', 'SUPABASE_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
         'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGSERVICE', 'PGSERVICEFILE',
         'SQLALCHEMY_DATABASE_URI', 'PYTHONPATH', 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS'
@@ -174,15 +180,17 @@ function Format-SanitizedJsonDiagnostic([string]$Label, [string]$JsonText) {
 }
 
 $runId = [guid]::NewGuid().ToString('N')
-$containerName = "reconcilepro-pg16-it-$runId"
+$containerVersionTag = $PostgresVersion.Replace('.', '-')
+$containerName = "reconcilepro-pg$containerVersionTag-it-$runId"
 $databaseName = "reconcilepro_it_$runId"
-$databaseUser = 'reconcilepro_test'
+$databaseUser = 'postgres'
 $dataDirectory = '/var/lib/postgresql/data'
 $labelKey = 'com.reconcilepro.pg-validation-run'
 $containerId = $null
 $containerCreationAttempted = $false
 $createdContainer = $false
 $password = New-TemporaryHexSecret
+$runtimePassword = New-TemporaryHexSecret
 $jwtSecret = New-TemporaryHexSecret
 $preexistingVolumeNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $overallExit = 1
@@ -209,10 +217,10 @@ try {
     ) -Environment @{ PYTHON_DOTENV_DISABLED = '1' } -WorkingDirectory $backendDir
     Write-ProcessOutput $alembicPreflight
     if ($alembicPreflight.ExitCode -ne 0 -or
-        $alembicPreflight.Stdout.Trim() -notmatch '(?m)^0004_import_batch_rev_counts\s+\(head\)\s*$') {
-        throw 'Alembic preflight validation failed; expected head 0004_import_batch_rev_counts was not discovered.'
+        $alembicPreflight.Stdout.Trim() -notmatch '(?m)^0005_runtime_role_security\s+\(head\)\s*$') {
+        throw 'Alembic preflight validation failed; expected head 0005_runtime_role_security was not discovered.'
     }
-    Write-Host 'Alembic preflight passed (head: 0004_import_batch_rev_counts).'
+    Write-Host 'Alembic preflight passed (head: 0005_runtime_role_security).'
 
     # Resolve and reject remote contexts before any command that contacts an engine.
     $context = Invoke-LocalProcess -FilePath $dockerExe -Arguments @('context', 'show')
@@ -235,7 +243,7 @@ try {
     }
     $daemonValues = $daemon.Stdout.Trim().Split('|')
     if ($daemonValues.Count -lt 2 -or $daemonValues[1] -ne 'linux') {
-        throw 'Docker must be running Linux containers for the PostgreSQL 16 image.'
+        throw "Docker must be running Linux containers for the PostgreSQL $PostgresVersion image."
     }
     Write-Host "Docker Engine $($daemonValues[0]) is available (Linux containers)."
 
@@ -265,7 +273,7 @@ try {
         '--env', "POSTGRES_USER=$databaseUser",
         '--env', 'POSTGRES_PASSWORD',
         '--env', "POSTGRES_DB=$databaseName",
-        'postgres:16-alpine'
+        $postgresImage
     ) -Environment @{ POSTGRES_PASSWORD = $password }
     if ($run.ExitCode -ne 0) {
         Write-ProcessOutput $run -Redact @($password)
@@ -428,15 +436,17 @@ try {
         'exec', $containerId, 'psql', '-U', $databaseUser, '-d', $databaseName,
         '-Atqc', 'SHOW server_version'
     )
-    if ($version.ExitCode -ne 0 -or $version.Stdout.Trim() -notmatch '^16\.') {
-        throw 'The temporary database did not report PostgreSQL 16.'
+    if ($version.ExitCode -ne 0 -or $version.Stdout.Trim() -notmatch $expectedServerVersionPattern) {
+        throw "The temporary database did not report the requested PostgreSQL $PostgresVersion version."
     }
     Write-Host "Disposable PostgreSQL version: $($version.Stdout.Trim())"
     Write-Host "Container is loopback-only at 127.0.0.1:$hostPort; data directory is tmpfs and no persistent volume is mounted."
 
     $url = "postgresql+psycopg://${databaseUser}:${password}@127.0.0.1:${hostPort}/${databaseName}"
+    $runtimeUrl = "postgresql+psycopg://reconcilepro_app:${runtimePassword}@127.0.0.1:${hostPort}/${databaseName}"
     $childEnvironment = @{
         DATABASE_URL = $url
+        APP_DATABASE_URL = $runtimeUrl
         RECONCILEPRO_TEST_DATABASE_URL = $url
         ENVIRONMENT = 'integration'
         PYTHON_DOTENV_DISABLED = '1'
@@ -446,11 +456,23 @@ try {
 
     Push-Location $backendDir
     try {
-        Write-Host 'Applying Alembic revisions 0001 through 0004 to the disposable database...'
+        Write-Host 'Provisioning a temporary least-privilege application role in the disposable database...'
+        $roleProvision = Invoke-LocalProcess -FilePath $pythonExe -Arguments @(
+            'postgres_integration_tests/provision_roles.py'
+        ) -Environment @{
+            DATABASE_URL = $url
+            RECONCILEPRO_TEST_RUNTIME_PASSWORD = $runtimePassword
+            RECONCILEPRO_PG_RUN_ID = $runId
+            PYTHON_DOTENV_DISABLED = '1'
+        } -WorkingDirectory $backendDir
+        Write-ProcessOutput $roleProvision -Redact @($url, $runtimeUrl, $password, $runtimePassword, $jwtSecret)
+        if ($roleProvision.ExitCode -ne 0) { throw "Disposable runtime role provisioning failed with exit code $($roleProvision.ExitCode)." }
+
+        Write-Host 'Applying Alembic revisions 0001 through 0005 as the disposable migration administrator...'
         $migration = Invoke-LocalProcess -FilePath $pythonExe -Arguments @(
             '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head'
         ) -Environment $childEnvironment -WorkingDirectory $backendDir
-        Write-ProcessOutput $migration -Redact @($url, $password, $jwtSecret)
+        Write-ProcessOutput $migration -Redact @($url, $runtimeUrl, $password, $runtimePassword, $jwtSecret)
         if ($migration.ExitCode -ne 0) { throw "Disposable PostgreSQL migration failed with exit code $($migration.ExitCode)." }
 
         Write-Host 'Running PostgreSQL-only integration tests (SQLite tests/conftest.py is excluded)...'
@@ -460,7 +482,7 @@ try {
             '-m', 'pytest', '-c', 'pytest.ini', '--confcutdir=postgres_integration_tests',
             'postgres_integration_tests', '-q', '-p', 'no:cacheprovider'
         ) -Environment $testEnvironment -WorkingDirectory $backendDir
-        Write-ProcessOutput $tests -Redact @($url, $password, $jwtSecret)
+        Write-ProcessOutput $tests -Redact @($url, $runtimeUrl, $password, $runtimePassword, $jwtSecret)
         if ($tests.ExitCode -ne 0) { throw "PostgreSQL integration tests failed with exit code $($tests.ExitCode)." }
         $overallExit = 0
     }
