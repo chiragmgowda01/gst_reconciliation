@@ -65,7 +65,10 @@ def run_reconciliation(
     # Read invoice data from Supabase invoices table using SQLAlchemy
     # Tenant-isolated: only invoices belonging to current_business.id
     try:
-        query = select(Invoice).where(Invoice.business_id == current_business.id)
+        query = select(Invoice).where(
+            Invoice.business_id == current_business.id,
+            Invoice.deleted_at.is_(None),
+        )
         if start_date and end_date:
             query = query.where(Invoice.invoice_date >= start_date, Invoice.invoice_date <= end_date)
 

@@ -1,4 +1,4 @@
-"""Regression coverage for production database startup and health behavior."""
+"""Regression coverage for runtime database selection and production fail-closed behavior."""
 
 from types import SimpleNamespace
 
@@ -15,22 +15,33 @@ def _set_production(monkeypatch):
     monkeypatch.delenv("RENDER", raising=False)
 
 
-def test_production_without_database_url_fails_clearly(monkeypatch):
+def test_production_requires_app_database_url_even_if_admin_database_url_exists(monkeypatch):
     _set_production(monkeypatch)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://admin:secret@db.invalid/app")
+    monkeypatch.delenv("APP_DATABASE_URL", raising=False)
 
-    with pytest.raises(RuntimeError, match="DATABASE_URL is required in production"):
+    assert database._select_runtime_database_url() == ""
+    with pytest.raises(RuntimeError, match="APP_DATABASE_URL is required in production"):
         database._build_engine(None)
 
 
-def test_production_rejects_sqlite_database_url(monkeypatch):
+def test_development_keeps_database_url_compatibility(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("APP_DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+
+    assert database._select_runtime_database_url() == "sqlite:///:memory:"
+
+
+def test_production_rejects_sqlite_app_database_url(monkeypatch):
     _set_production(monkeypatch)
 
     with pytest.raises(RuntimeError, match="must use PostgreSQL"):
         database._build_engine("sqlite:///:memory:")
 
 
-def test_production_invalid_database_url_fails_without_echoing_it(monkeypatch):
+def test_production_invalid_app_database_url_fails_without_echoing_it(monkeypatch):
     _set_production(monkeypatch)
     invalid_url = "postgresql://private-user:private-password@private-host/db with spaces"
 
@@ -58,19 +69,12 @@ def test_production_postgresql_connection_failure_never_falls_back(monkeypatch, 
     assert "secret-password" not in caplog.text
 
 
-def test_explicit_development_sqlite_configuration_works(monkeypatch):
-    monkeypatch.setenv("ENVIRONMENT", "development")
-    monkeypatch.delenv("RENDER", raising=False)
-
-    configured_engine = database._build_engine("sqlite:///:memory:")
-    try:
-        assert configured_engine.dialect.name == "sqlite"
-    finally:
-        configured_engine.dispose()
-
-
-def test_healthy_configured_postgresql_passes_production_health_check(monkeypatch):
+def test_production_rejects_non_dedicated_connected_role(monkeypatch):
     _set_production(monkeypatch)
+
+    class FakeResult:
+        def one(self):
+            return ("postgres", "postgres")
 
     class FakeConnection:
         def __enter__(self):
@@ -79,8 +83,43 @@ def test_healthy_configured_postgresql_passes_production_health_check(monkeypatc
         def __exit__(self, *_args):
             return False
 
-        def execute(self, _statement):
+        def execute(self, statement):
+            if "current_user" in str(statement):
+                return FakeResult()
             return None
+
+    class FakeEngine:
+        dialect = SimpleNamespace(name="postgresql")
+
+        def connect(self):
+            return FakeConnection()
+
+        def dispose(self):
+            self.disposed = True
+
+    engine = FakeEngine()
+    monkeypatch.setattr(database, "create_engine", lambda *_args, **_kwargs: engine)
+    with pytest.raises(RuntimeError, match="dedicated reconcilepro_app role"):
+        database._build_engine("postgresql+psycopg://postgres:password@db.invalid/app")
+    assert engine.disposed
+
+
+def test_healthy_configured_postgresql_passes_production_health_check(monkeypatch):
+    _set_production(monkeypatch)
+
+    class FakeResult:
+        def one(self):
+            return ("reconcilepro_app", "reconcilepro_app")
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, statement):
+            return FakeResult() if "current_user" in str(statement) else None
 
     class FakeEngine:
         dialect = SimpleNamespace(name="postgresql")
@@ -117,6 +156,17 @@ def test_healthy_configured_postgresql_passes_production_health_check(monkeypatc
     assert response.status_code == 200
     assert response.json()["database_dialect"] == "postgresql"
     assert "password" not in response.text
+
+
+def test_explicit_development_sqlite_configuration_works(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RENDER", raising=False)
+
+    configured_engine = database._build_engine("sqlite:///:memory:")
+    try:
+        assert configured_engine.dialect.name == "sqlite"
+    finally:
+        configured_engine.dispose()
 
 
 def test_pytest_global_database_is_isolated_sqlite():

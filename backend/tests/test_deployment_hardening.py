@@ -200,7 +200,8 @@ def test_gstr3b_upload_idempotency_and_update(client, multi_tenant_setup):
         headers=headers,
     )
     assert res3.status_code == 200
-    assert res3.json()["imported"] == 1
+    assert res3.json()["imported"] == 0
+    assert res3.json()["revised"] == 1
     assert res3.json()["duplicates"] == 0
 
     # Database must still have only 1 record, but with revised values

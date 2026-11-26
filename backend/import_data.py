@@ -4,11 +4,25 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from database import SessionLocal
-from models.base import Base
+ISOLATED_DEMO_SEED_FLAG = "RECONCILEPRO_ISOLATED_DEMO_SEED"
+
+
+def is_production_mode() -> bool:
+    """Detect Render deployments and explicit production environment settings."""
+    env = os.getenv("ENVIRONMENT", "").strip().lower()
+    return env in ("production", "prod") or "RENDER" in os.environ
+
+
+# Refuse a direct production seed invocation before importing database.py, whose
+# module initialization opens the configured database connection.
+if __name__ == "__main__" and is_production_mode():
+    raise SystemExit("Production fixture seeding is disabled.")
+
+from database import SessionLocal, engine
+from database_migrations import assert_schema_at_head
 from models.models import Business, GSTR3BReturn, Invoice, User
 from services.auth import hash_password
 from services.validation import (
@@ -24,10 +38,36 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 
 
-def is_production_mode() -> bool:
-    """Detect if running in a cloud production environment (Render / production flag)."""
-    env = os.getenv("ENVIRONMENT", "").strip().lower()
-    return env in ("production", "prod") or os.getenv("RENDER") is not None
+def ensure_isolated_demo_seed_allowed(database_engine) -> None:
+    """Allow fixture seeding only into an explicitly selected, empty SQLite DB."""
+    if is_production_mode():
+        raise RuntimeError("Production fixture seeding is disabled.")
+    if os.getenv(ISOLATED_DEMO_SEED_FLAG, "").strip().lower() != "true":
+        raise RuntimeError(
+            f"Fixture seeding requires {ISOLATED_DEMO_SEED_FLAG}=true for an isolated demo database."
+        )
+    if database_engine.dialect.name != "sqlite":
+        raise RuntimeError("Isolated demo fixture seeding is limited to SQLite databases.")
+    if not os.getenv("DATABASE_URL", "").strip():
+        raise RuntimeError("Set an explicit SQLite DATABASE_URL for isolated demo seeding.")
+
+    database_path = database_engine.url.database
+    default_database = (Path(__file__).resolve().parent / "gst_local.db").resolve()
+    if database_path not in {None, "", ":memory:"} and Path(database_path).resolve() == default_database:
+        raise RuntimeError("The shared local development database is not an isolated demo target.")
+
+    required_tables = {"users", "businesses", "invoices", "gstr3b_returns"}
+    available_tables = set(inspect(database_engine).get_table_names())
+    if not required_tables.issubset(available_tables):
+        raise RuntimeError("Isolated demo database must be initialized with the current schema first.")
+
+    with database_engine.connect() as connection:
+        for table_name in sorted(required_tables):
+            count = connection.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+            if count:
+                raise RuntimeError(
+                    "Isolated demo fixture seeding requires an empty database; existing application records were found."
+                )
 
 
 def get_seed_credentials() -> tuple[str, str]:
@@ -101,7 +141,7 @@ def ensure_business(session, gstin: str, business_name: str | None = None) -> Bu
     return business
 
 
-def import_csv_file(file_name: str, source: str, business_id: int | None = None) -> int:
+def _import_csv_file(file_name: str, source: str, business_id: int | None = None) -> int:
     """Import sales/purchase/GSTR invoice records into invoices table."""
     session = SessionLocal()
     try:
@@ -175,7 +215,7 @@ def import_csv_file(file_name: str, source: str, business_id: int | None = None)
         session.close()
 
 
-def import_gstr3b_file(file_name: str = "gstr3b.csv", business_id: int | None = None) -> int:
+def _import_gstr3b_file(file_name: str = "gstr3b.csv", business_id: int | None = None) -> int:
     """Import monthly GSTR-3B return summary into persistent gstr3b_returns table."""
     session = SessionLocal()
     try:
@@ -242,23 +282,40 @@ def import_gstr3b_file(file_name: str = "gstr3b.csv", business_id: int | None = 
         session.close()
 
 
+def import_csv_file(file_name: str, source: str, business_id: int | None = None) -> int:
+    """Guarded entry point for importing a synthetic invoice fixture."""
+    ensure_isolated_demo_seed_allowed(engine)
+    assert_schema_at_head(engine)
+    return _import_csv_file(file_name, source, business_id)
+
+
+def import_gstr3b_file(file_name: str = "gstr3b.csv", business_id: int | None = None) -> int:
+    """Guarded entry point for importing a synthetic GSTR-3B fixture."""
+    ensure_isolated_demo_seed_allowed(engine)
+    assert_schema_at_head(engine)
+    return _import_gstr3b_file(file_name, business_id)
+
+
 def import_all_gst_csv_data() -> dict[str, int]:
     """Seed all GST registers and GSTR returns from synthetic fixtures."""
+    ensure_isolated_demo_seed_allowed(engine)
+    assert_schema_at_head(engine)
     results = {
-        "sales_register.csv": import_csv_file("sales_register.csv", "sales_register"),
-        "gstr1.csv": import_csv_file("gstr1.csv", "gstr1"),
-        "purchase_register.csv": import_csv_file("purchase_register.csv", "purchase_register"),
-        "gstr2a.csv": import_csv_file("gstr2a.csv", "gstr2a"),
-        "gstr2b.csv": import_csv_file("gstr2b.csv", "gstr2b"),
-        "gstr3b.csv": import_gstr3b_file("gstr3b.csv"),
+        "sales_register.csv": _import_csv_file("sales_register.csv", "sales_register"),
+        "gstr1.csv": _import_csv_file("gstr1.csv", "gstr1"),
+        "purchase_register.csv": _import_csv_file("purchase_register.csv", "purchase_register"),
+        "gstr2a.csv": _import_csv_file("gstr2a.csv", "gstr2a"),
+        "gstr2b.csv": _import_csv_file("gstr2b.csv", "gstr2b"),
+        "gstr3b.csv": _import_gstr3b_file("gstr3b.csv"),
     }
     return results
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    Base.metadata.create_all(bind=SessionLocal().bind)
     try:
+        ensure_isolated_demo_seed_allowed(engine)
+        assert_schema_at_head(engine)
         admin_email, _ = get_seed_credentials()
         logger.info("Initializing database with seed admin email: %s", admin_email)
         results = import_all_gst_csv_data()

@@ -80,6 +80,8 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, act
 
   const gstr3bData = gstr3b || crossForm?.gstr3b_summary;
   const gstr3bSource = gstr3b?.source ?? crossForm?.gstr3b_source;
+  const provenance = gstr3b?.provenance ?? crossForm?.gstr3b_provenance;
+  const isSyntheticSummary = gstr3bSource === "demo_fixture" || provenance?.source_category === "gst_simulator";
   const businessName = activeBusiness?.name || gstr3b?.business_name || crossForm?.business_name;
 
   if (!cfLoading && (!gstr3bData || gstr3b?.data_available === false || crossForm?.gstr3b_data_available === false)) {
@@ -106,7 +108,7 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, act
 
   return (
     <div className="animate-fade-in">
-      {gstr3bData && gstr3bSource === "demo_fixture" && (
+      {gstr3bData && isSyntheticSummary && (
         <div
           role="alert"
           style={{
@@ -125,7 +127,7 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, act
         >
           <AlertTriangle size={17} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
-            <strong>Synthetic demonstration data.</strong> These figures come from a demo fixture and do not represent an actual filed GST return.
+            <strong>Synthetic demonstration data.</strong> These figures come from a demo fixture{gstr3bSource === "database" ? " saved to this business database" : ""} and do not represent an actual filed GST return.
           </span>
         </div>
       )}
@@ -135,11 +137,32 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, act
           <span>Source information is unavailable for these figures. They have not been confirmed as a filed return or verified with GSTN.</span>
         </div>
       )}
+      {gstr3bData && gstr3bSource === "database" && (
+        <div className="data-source-note" role="note">
+          <Info size={16} />
+          <span>
+            Saved in {businessName || "this business"}’s database.
+            {provenance?.source_category === "gst_simulator"
+              ? ` Origin: synthetic fixture ${provenance.fixture_identifier || "gstr3b.csv"}.`
+              : provenance?.source_category === "csv_upload"
+                ? ` Origin: uploaded file ${provenance.original_filename || "(filename unavailable)"}.`
+                : provenance?.source_category === "untracked"
+                  ? " Original import source was not recorded."
+                  : ""}
+          </span>
+        </div>
+      )}
+      {gstr3bData && gstr3bSource === "demo_fixture" && (
+        <div className="data-source-note" role="note">
+          <Info size={16} />
+          <span>Source: read-only synthetic fixture gstr3b.csv. These figures are not saved in the business database.</span>
+        </div>
+      )}
 
       {/* 1. Header */}
       <div className="section-header" style={{ marginBottom: 20 }}>
         <div>
-          <h2 className="section-title">Form GSTR-3B Self-Assessed Tax Return</h2>
+          <h2 className="section-title">GSTR-3B Summary</h2>
           <p className="section-subtitle">
             Monthly statutory return of outward supplies, input tax credit claimed, and net cash tax liability
           </p>
@@ -163,9 +186,13 @@ export function Gstr3bPage({ gstr3b, sales = [], purchases = [], onNavigate, act
         <div className="gstr3b-statement-card">
           <div className="statement-header">
             <div>
-              <span className="statement-tag">Statutory Summary</span>
-              <h3 className="statement-title">Tax Return Liabilities & Credit Schedule</h3>
-              <p className="statement-subtitle">Values declared in Form GSTR-3B for tax period {taxPeriod}</p>
+              <span className="statement-tag">{isSyntheticSummary ? "Demonstration Summary" : "Saved Summary"}</span>
+              <h3 className="statement-title">{isSyntheticSummary ? "Synthetic GSTR-3B Figures" : "Saved GSTR-3B Values"}</h3>
+              <p className="statement-subtitle">
+                {isSyntheticSummary
+                  ? `Demonstration figures for tax period ${taxPeriod}; not a filed GST return.`
+                  : `Saved business summary for tax period ${taxPeriod}.`}
+              </p>
             </div>
           </div>
           <div className="statement-grid">

@@ -20,13 +20,14 @@ for p in env_candidates:
         break
 
 from database import engine, get_db, is_production_environment
+from database_migrations import assert_schema_at_head
 from models import models
-from models.base import Base
 from routers.anomalies import router as anomalies_router
 from routers.auth import router as auth_router
 from routers.gst import router as gst_router
 from routers.gstr3b import router as gstr3b_router
 from routers.invoices import router as invoices_router, upload_csv
+from routers.imports import router as imports_router
 from routers.reconciliation import router as reconciliation_router
 from routers.reports import router as reports_router
 
@@ -38,18 +39,17 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Production must not start if schema initialization cannot reach the
-    # configured PostgreSQL database. No alternate database is selected.
+    # The application never mutates schema on startup. All environments must
+    # have an explicitly applied Alembic revision before serving requests.
     try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database schema verified and initialized.")
+        assert_schema_at_head(engine)
+        logger.info("Database schema migration revision verified.")
     except Exception as exc:
-        if is_production_environment():
-            logger.error("Production database schema initialization failed (%s).", type(exc).__name__)
-            raise RuntimeError(
-                "Production startup stopped because PostgreSQL schema initialization failed."
-            ) from None
-        logger.warning("Database schema initialization failed (%s).", type(exc).__name__)
+        logger.error("Database schema migration check failed (%s).", type(exc).__name__)
+        raise RuntimeError(
+            "Application startup stopped because database migrations are missing or out of date. "
+            "Run the approved Alembic upgrade before starting the application."
+        ) from None
     yield
 
 
@@ -90,6 +90,7 @@ app.include_router(gst_router)
 app.include_router(reconciliation_router)
 app.include_router(gstr3b_router)
 app.include_router(invoices_router)
+app.include_router(imports_router)
 app.include_router(anomalies_router)
 app.include_router(reports_router)
 

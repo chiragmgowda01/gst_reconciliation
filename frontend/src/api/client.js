@@ -172,6 +172,33 @@ export const api = {
     return request(`/invoices${qs ? `?${qs}` : ""}`);
   },
 
+  async getImportBatches(params = {}) {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    if (params.source_type) query.set("source_type", params.source_type);
+    if (params.status) query.set("status", params.status);
+    if (params.include_deleted) query.set("include_deleted", "true");
+    const qs = query.toString();
+    return request(`/imports/batches${qs ? `?${qs}` : ""}`);
+  },
+
+  async getImportBatch(batchId) {
+    return request(`/imports/batches/${encodeURIComponent(batchId)}`);
+  },
+
+  async previewImportBatchDeletion(batchId) {
+    return request(`/imports/batches/${encodeURIComponent(batchId)}/delete-preview`, { method: "POST" });
+  },
+
+  async deleteImportBatch(batchId) {
+    return request(`/imports/batches/${encodeURIComponent(batchId)}/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    });
+  },
+
   async getInvoice(id) {
     return request(`/invoices/${id}`);
   },
@@ -395,6 +422,22 @@ export const api = {
         tax_period: payload.tax_period,
         counterparty_gstin: payload.counterparty_gstin || null,
       }),
+    });
+  },
+
+  async previewGstr3bImport(taxPeriod) {
+    return request("/gst/gstr3b/import/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tax_period: taxPeriod }),
+    });
+  },
+
+  async confirmGstr3bImport(taxPeriod) {
+    return request("/gst/gstr3b/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tax_period: taxPeriod }),
     });
   },
 

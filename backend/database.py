@@ -25,6 +25,19 @@ def is_production_environment() -> bool:
     return environment in {"production", "prod"} or "RENDER" in os.environ
 
 
+def _select_runtime_database_url() -> str:
+    """Select the URL used by FastAPI; the administrator URL is dev-only fallback."""
+    runtime_url = os.getenv("APP_DATABASE_URL", "").strip()
+    if runtime_url:
+        return runtime_url
+    if not is_production_environment():
+        return os.getenv("DATABASE_URL", "").strip()
+    return ""
+
+
+RUNTIME_DATABASE_ROLE = "reconcilepro_app"
+
+
 def _build_engine(url: str | None):
     production = is_production_environment()
     configured_url = (url or "").strip()
@@ -32,7 +45,7 @@ def _build_engine(url: str | None):
     if not configured_url:
         if production:
             raise RuntimeError(
-                "DATABASE_URL is required in production and must point to PostgreSQL."
+                "APP_DATABASE_URL is required in production and must point to PostgreSQL."
             )
         # Keep the established local-development default. Pytest overrides this
         # with its dedicated in-memory URL in backend/tests/conftest.py.
@@ -44,10 +57,10 @@ def _build_engine(url: str | None):
         dialect_name = parsed_url.get_backend_name()
         if production and dialect_name != "postgresql":
             raise RuntimeError(
-                "Production DATABASE_URL must use PostgreSQL; SQLite and other databases are not allowed."
+                "Production APP_DATABASE_URL must use PostgreSQL; SQLite and other databases are not allowed."
             )
 
-        if dialect_name == "postgresql" and parsed_url.drivername == "postgresql":
+        if dialect_name == "postgresql":
             parsed_url = parsed_url.set(drivername="postgresql+psycopg")
 
         connect_args = {"check_same_thread": False} if dialect_name == "sqlite" else {}
@@ -73,6 +86,15 @@ def _build_engine(url: str | None):
             )
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
+            if production:
+                connected_roles = connection.execute(
+                    text("SELECT current_user, session_user")
+                ).one()
+                if tuple(connected_roles) != (RUNTIME_DATABASE_ROLE, RUNTIME_DATABASE_ROLE):
+                    engine.dispose()
+                    raise RuntimeError(
+                        "Production APP_DATABASE_URL must connect as the dedicated reconcilepro_app role."
+                    )
         return engine
     except RuntimeError:
         raise
@@ -82,16 +104,16 @@ def _build_engine(url: str | None):
         logger.error("Database engine initialization failed (%s).", type(exc).__name__)
         if production:
             raise RuntimeError(
-                "Unable to initialize the required production PostgreSQL database. "
-                "Check DATABASE_URL and database availability."
+                "Unable to initialize the required production PostgreSQL runtime database. "
+                "Check APP_DATABASE_URL and database availability."
             ) from None
         raise RuntimeError(
             f"Unable to initialize the configured database ({type(exc).__name__})."
         ) from None
 
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = _build_engine(DATABASE_URL)
+APP_DATABASE_URL = _select_runtime_database_url()
+engine = _build_engine(APP_DATABASE_URL or None)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 

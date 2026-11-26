@@ -107,7 +107,10 @@ def _get_gstr3b_record(
     Priority 1: Persistent database table `gstr3b_returns`.
     Priority 2: Fallback to read-only demo CSV fixture ONLY for verified demo GSTIN and permitted environment.
     """
-    query = select(GSTR3BReturn).where(GSTR3BReturn.business_id == business_id)
+    query = select(GSTR3BReturn).where(
+        GSTR3BReturn.business_id == business_id,
+        GSTR3BReturn.deleted_at.is_(None),
+    )
     if tax_period:
         query = query.where(GSTR3BReturn.tax_period == tax_period.strip())
     else:
@@ -115,6 +118,7 @@ def _get_gstr3b_record(
 
     record = db.scalar(query)
     if record is not None:
+        batch = record.import_batch
         return {
             "tax_period": record.tax_period,
             "output_tax": record.output_tax,
@@ -122,7 +126,25 @@ def _get_gstr3b_record(
             "itc_reversed": record.itc_reversed,
             "net_itc": record.net_itc,
             "source": "database",
+            "provenance": {
+                "source_category": batch.source_category if batch else "untracked",
+                "source_type": batch.source_type if batch else None,
+                "fixture_identifier": batch.fixture_identifier if batch else None,
+                "original_filename": batch.original_filename if batch else None,
+                "imported_at": batch.created_at.isoformat() if batch and batch.created_at else None,
+            },
         }
+
+    # A tombstoned period is an explicit deletion, not permission to replace the
+    # database record with a synthetic fixture in the summary response.
+    deleted_query = select(GSTR3BReturn.id).where(
+        GSTR3BReturn.business_id == business_id,
+        GSTR3BReturn.deleted_at.is_not(None),
+    )
+    if tax_period:
+        deleted_query = deleted_query.where(GSTR3BReturn.tax_period == tax_period.strip())
+    if db.scalar(deleted_query.limit(1)) is not None:
+        return None
 
     # Safe demo fallback check (GSTIN-verified, production-guarded)
     if _is_demo_fallback_permitted(business_gstin):
@@ -135,6 +157,10 @@ def _get_gstr3b_record(
                 "itc_reversed": float(row["itc_reversed"]),
                 "net_itc": float(row["net_itc"]),
                 "source": "demo_fixture",
+                "provenance": {
+                    "source_category": "demo_fixture",
+                    "fixture_identifier": "gstr3b.csv",
+                },
             }
 
     return None
@@ -145,7 +171,10 @@ def _get_db_invoice_sums(business_id: int, db: Session, start_date=None, end_dat
     Sum taxable_value and gst_amount by source type for the given business.
     Returns dict: source -> {taxable_value: float, gst_amount: float, count: int}
     """
-    query = select(Invoice).where(Invoice.business_id == business_id)
+    query = select(Invoice).where(
+        Invoice.business_id == business_id,
+        Invoice.deleted_at.is_(None),
+    )
     if start_date and end_date:
         query = query.where(
             Invoice.invoice_date >= start_date,
@@ -196,6 +225,7 @@ def gstr3b_summary(
         # Do not fabricate values for businesses without GSTR-3B data
         return {
             "business_id": current_business.id,
+            "business_name": current_business.name,
             "tax_period": resolved_period,
             "output_tax": 0.0,
             "eligible_itc": 0.0,
@@ -208,6 +238,7 @@ def gstr3b_summary(
 
     return {
         "business_id": current_business.id,
+        "business_name": current_business.name,
         "tax_period": record["tax_period"],
         "output_tax": float(record["output_tax"]),
         "eligible_itc": float(record["eligible_itc"]),
@@ -215,6 +246,7 @@ def gstr3b_summary(
         "net_itc": float(record["net_itc"]),
         "data_available": True,
         "source": record["source"],
+        "provenance": record.get("provenance"),
     }
 
 

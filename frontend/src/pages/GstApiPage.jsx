@@ -32,6 +32,117 @@ const formatINR = (val) => {
   }).format(Number(val));
 };
 
+const GSTR3B_SUMMARY_FIELDS = [
+  ["output_tax", "Output tax liability"],
+  ["eligible_itc", "Eligible ITC"],
+  ["itc_reversed", "ITC reversed"],
+  ["net_itc", "Net ITC"],
+];
+
+function Gstr3bImportPreview({ previewData, onCancel, onConfirm, confirmLoading }) {
+  if (previewData.status === "no_data") {
+    return (
+      <div>
+        <div className="empty-state" style={{ padding: 24 }}>
+          <Receipt size={30} className="empty-icon" />
+          <h3>No fixture data for this period</h3>
+          <p>{previewData.message}</p>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  const operationLabels = {
+    new_import: "New summary will be imported",
+    duplicate: "Saved summary already matches",
+    revision: "Saved summary will be revised",
+  };
+  const canConfirm = previewData.operation === "new_import" || previewData.operation === "revision";
+
+  return (
+    <div>
+      <div
+        role="alert"
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "flex-start",
+          padding: "10px 12px",
+          marginBottom: 14,
+          border: "1px solid #fcd34d",
+          borderRadius: 6,
+          background: "#fffbeb",
+          color: "#92400e",
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>
+          Synthetic demonstration figures from <code>gstr3b.csv</code>. They do not represent an actual filed GST return. Confirm only if you want these values saved for this business.
+        </span>
+      </div>
+
+      <div style={{ marginBottom: 12, fontSize: 13 }}>
+        <strong>{operationLabels[previewData.operation] || "Review summary"}</strong>
+        <div style={{ color: "var(--text-muted)", marginTop: 4 }}>
+          Business: <strong>{previewData.business_name}</strong> · Tax period: <strong>{previewData.tax_period}</strong>
+        </div>
+        <div style={{ color: "var(--text-muted)", marginTop: 4 }}>{previewData.message}</div>
+      </div>
+
+      <div className="table-wrapper" style={{ marginBottom: 16 }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Summary amount</th>
+              <th style={{ textAlign: "right" }}>Synthetic fixture</th>
+              <th style={{ textAlign: "right" }}>Saved value</th>
+              <th style={{ textAlign: "right" }}>Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {GSTR3B_SUMMARY_FIELDS.map(([field, label]) => {
+              const fixtureValue = previewData.fixture_summary[field];
+              const existingValue = previewData.existing_summary?.[field];
+              const difference = previewData.differences?.[field];
+              return (
+                <tr key={field}>
+                  <td>{label}</td>
+                  <td style={{ textAlign: "right" }}>{formatINR(fixtureValue)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    {existingValue === undefined ? "No saved value" : formatINR(existingValue)}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {difference === undefined ? "—" : `${difference > 0 ? "+" : ""}${formatINR(difference)}`}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={confirmLoading}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={onConfirm}
+          disabled={!canConfirm || confirmLoading}
+        >
+          {confirmLoading ? "Saving..." : previewData.operation === "revision" ? "Confirm Revision" : "Confirm & Import"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
   // Status state
   const [statusData, setStatusData] = useState(null);
@@ -189,7 +300,6 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
 
   // 4. Open Import Preview Modal
   const handleOpenImportPreview = async () => {
-    if (selectedReturn === "gstr3b") return;
     setShowImportModal(true);
     setPreviewLoading(true);
     setPreviewError("");
@@ -197,11 +307,13 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
     setConfirmResult(null);
 
     try {
-      const res = await api.previewGstImport({
-        return_type: selectedReturn,
-        tax_period: taxPeriod.trim(),
-        counterparty_gstin: counterpartyGstin.trim() || null,
-      });
+      const res = selectedReturn === "gstr3b"
+        ? await api.previewGstr3bImport(taxPeriod.trim())
+        : await api.previewGstImport({
+            return_type: selectedReturn,
+            tax_period: taxPeriod.trim(),
+            counterparty_gstin: counterpartyGstin.trim() || null,
+          });
       setPreviewData(res);
     } catch (err) {
       setPreviewError(err.message || "Failed to generate import preview.");
@@ -217,16 +329,22 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
     setPreviewError("");
 
     try {
-      const res = await api.confirmGstImport({
-        return_type: selectedReturn,
-        tax_period: taxPeriod.trim(),
-        counterparty_gstin: counterpartyGstin.trim() || null,
-      });
+      const res = selectedReturn === "gstr3b"
+        ? await api.confirmGstr3bImport(taxPeriod.trim())
+        : await api.confirmGstImport({
+            return_type: selectedReturn,
+            tax_period: taxPeriod.trim(),
+            counterparty_gstin: counterpartyGstin.trim() || null,
+          });
       setConfirmResult(res);
-      setImportBanner(res);
+      if (res.status === "success" || res.status === "partial") {
+        setImportBanner(res);
+      } else {
+        setImportBanner(null);
+      }
 
       // Notify parent App to refresh dashboard & reconciliation calculations
-      if (onImportSuccess) {
+      if (res.imported_count > 0 && onImportSuccess) {
         onImportSuccess();
       }
     } catch (err) {
@@ -326,9 +444,9 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
           style={{
             padding: "14px 18px",
             borderRadius: "var(--radius-md)",
-            backgroundColor: "#f0fdf4",
-            border: "1px solid #86efac",
-            color: "#14532d",
+            backgroundColor: importBanner.status === "partial" ? "#fffbeb" : "#f0fdf4",
+            border: importBanner.status === "partial" ? "1px solid #fde68a" : "1px solid #86efac",
+            color: importBanner.status === "partial" ? "#92400e" : "#14532d",
             marginBottom: 20,
             display: "flex",
             alignItems: "center",
@@ -338,13 +456,27 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <CheckCircle2 size={18} color="#16a34a" />
+            {importBanner.status === "partial" ? (
+              <AlertTriangle size={18} color="#d97706" />
+            ) : (
+              <CheckCircle2 size={18} color="#16a34a" />
+            )}
             <div style={{ fontSize: 13 }}>
-              <strong>Import Successful:</strong> {importBanner.message}
+              <strong>{importBanner.status === "partial" ? "Import Partially Completed:" : "Import Successful:"}</strong>{" "}
+              {importBanner.message}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {selectedReturn === "gstr1" ? (
+            {selectedReturn === "gstr3b" ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => onNavigate && onNavigate("gstr3b")}
+              >
+                <FileText size={13} />
+                <span>Open GSTR-3B Summary</span>
+              </button>
+            ) : selectedReturn === "gstr1" ? (
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
@@ -363,14 +495,16 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                 <span>Open Purchase Reconciliation</span>
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => onNavigate && onNavigate("invoices")}
-            >
-              <FileText size={13} />
-              <span>Invoice Master</span>
-            </button>
+            {selectedReturn !== "gstr3b" && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => onNavigate && onNavigate("invoices")}
+              >
+                <FileText size={13} />
+                <span>Invoice Master</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setImportBanner(null)}
@@ -882,19 +1016,17 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
               <span>Import to Reconciliation</span>
             </button>
           ) : (
-            <div
-              style={{
-                fontSize: 11.5,
-                color: "var(--text-muted)",
-                marginLeft: "auto",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-              }}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleOpenImportPreview}
+              disabled={returnLoading || previewLoading}
+              style={{ fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}
+              title="Preview and confirm saving this synthetic monthly summary to the business database"
             >
-              <Info size={13} color="var(--text-dim)" />
-              <span>Monthly summary return (view-only; not imported to invoice ledger)</span>
-            </div>
+              <UploadCloud size={13} />
+              <span>Preview GSTR-3B Import</span>
+            </button>
           )}
         </div>
 
@@ -925,6 +1057,29 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
         ) : selectedReturn === "gstr3b" ? (
           /* GSTR-3B SUMMARY VIEW */
           <div>
+            {returnData?.summary?.found === true && (
+              <div
+                role="note"
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "flex-start",
+                  padding: "10px 12px",
+                  marginBottom: 14,
+                  border: "1px solid #fcd34d",
+                  borderRadius: 6,
+                  background: "#fffbeb",
+                  color: "#92400e",
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Synthetic demonstration figures only. They do not represent an actual filed GST return. Use Preview GSTR-3B Import to review and explicitly save them to this business.
+                </span>
+              </div>
+            )}
             {returnData?.summary?.found === false ? (
               <div
                 style={{
@@ -936,8 +1091,8 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                 }}
               >
                 <Receipt size={36} color="var(--text-dim)" style={{ marginBottom: 12 }} />
-                <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-main)", marginBottom: 6 }}>
-                  No GSTR-3B Return for Period {taxPeriod}
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-main)", marginBottom: 6 }}>
+                    No GSTR-3B Fixture for Period {taxPeriod}
                 </h3>
                 <p style={{ fontSize: 13, color: "var(--text-muted)", maxWidth: 480, margin: "0 auto" }}>
                   {returnData?.summary?.note ||
@@ -1301,11 +1456,14 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                 <div>
                   <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "var(--text-main)" }}>
                     {confirmResult
-                      ? "Import Complete"
-                      : `Import ${selectedReturn.toUpperCase()} to Reconciliation Ledger`}
+                      ? "Import result"
+                      : selectedReturn === "gstr3b"
+                        ? "Preview GSTR-3B Summary Import"
+                        : `Import ${selectedReturn.toUpperCase()} to Reconciliation Ledger`}
                   </h3>
                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    Tax Period: <strong>{taxPeriod}</strong> • Target Source: <code>{selectedReturn}</code>
+                    Tax Period: <strong>{taxPeriod}</strong>
+                    {selectedReturn === "gstr3b" ? " · Synthetic fixture" : <> • Target Source: <code>{selectedReturn}</code></>}
                   </span>
                 </div>
               </div>
@@ -1325,7 +1483,9 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
               <div style={{ textAlign: "center", padding: "40px 0" }}>
                 <LoadingSkeleton />
                 <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 12 }}>
-                  Analyzing return records and checking duplicates in active ledger...
+                    {selectedReturn === "gstr3b"
+                      ? "Checking the synthetic summary against the saved business period..."
+                      : "Analyzing return records and checking duplicates in active ledger..."}
                 </p>
               </div>
             ) : previewError ? (
@@ -1351,19 +1511,46 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
               <div>
                 <div
                   style={{
-                    backgroundColor: "#f0fdf4",
-                    border: "1px solid #86efac",
+                    backgroundColor: confirmResult.status === "success" ? "#f0fdf4" : "#fffbeb",
+                    border: confirmResult.status === "success" ? "1px solid #86efac" : "1px solid #fde68a",
                     borderRadius: "var(--radius-md)",
                     padding: "20px",
                     textAlign: "center",
                     marginBottom: 20,
                   }}
                 >
-                  <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 8 }} />
-                  <h4 style={{ fontSize: 16, fontWeight: 700, color: "#14532d", margin: "0 0 6px" }}>
-                    Successfully Staged into Reconciliation
+                  {confirmResult.status === "success" ? (
+                    <CheckCircle2 size={36} color="#16a34a" style={{ marginBottom: 8 }} />
+                  ) : (
+                    <AlertTriangle size={36} color="#d97706" style={{ marginBottom: 8 }} />
+                  )}
+                  <h4
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: confirmResult.status === "success" ? "#14532d" : "#92400e",
+                      margin: "0 0 6px",
+                    }}
+                  >
+                    {confirmResult.status === "success"
+                      ? confirmResult.operation === "revision" ? "GSTR-3B summary revised" : "Import completed"
+                      : confirmResult.status === "duplicate"
+                        ? "No changes needed"
+                        : confirmResult.status === "no_data"
+                          ? "No records available"
+                          : confirmResult.status === "failed"
+                            ? "Import failed"
+                            : confirmResult.status === "partial"
+                              ? "Import partially completed"
+                              : "Import result"}
                   </h4>
-                  <p style={{ fontSize: 13, color: "#166534", margin: 0 }}>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: confirmResult.status === "success" ? "#166534" : "#92400e",
+                      margin: 0,
+                    }}
+                  >
                     {confirmResult.message}
                   </p>
                 </div>
@@ -1379,21 +1566,33 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                 >
                   <div style={{ backgroundColor: "#f8fafc", padding: 10, borderRadius: 6, border: "1px solid #e2e8f0" }}>
                     <span style={{ fontSize: 11, color: "var(--text-muted)", display: "block" }}>Imported</span>
-                    <strong style={{ fontSize: 18, color: "var(--success)" }}>{confirmResult.imported_count}</strong>
+                    <strong style={{ fontSize: 18, color: "var(--success)" }}>{confirmResult.imported_count ?? 0}</strong>
                   </div>
                   <div style={{ backgroundColor: "#f8fafc", padding: 10, borderRadius: 6, border: "1px solid #e2e8f0" }}>
                     <span style={{ fontSize: 11, color: "var(--text-muted)", display: "block" }}>Skipped Duplicates</span>
-                    <strong style={{ fontSize: 18, color: "var(--warning)" }}>{confirmResult.duplicate_count}</strong>
+                    <strong style={{ fontSize: 18, color: "var(--warning)" }}>{confirmResult.duplicate_count ?? 0}</strong>
                   </div>
                   <div style={{ backgroundColor: "#f8fafc", padding: 10, borderRadius: 6, border: "1px solid #e2e8f0" }}>
                     <span style={{ fontSize: 11, color: "var(--text-muted)", display: "block" }}>Rejected</span>
-                    <strong style={{ fontSize: 18, color: "var(--text-dim)" }}>{confirmResult.rejected_count}</strong>
+                    <strong style={{ fontSize: 18, color: "var(--text-dim)" }}>{confirmResult.rejected_count ?? 0}</strong>
                   </div>
                 </div>
 
                 {/* Navigation Action Buttons */}
                 <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  {selectedReturn === "gstr1" ? (
+                  {selectedReturn === "gstr3b" ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        setShowImportModal(false);
+                        if (onNavigate) onNavigate("gstr3b");
+                      }}
+                    >
+                      <FileText size={14} />
+                      <span>Open GSTR-3B Summary</span>
+                    </button>
+                  ) : selectedReturn === "gstr1" ? (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -1418,17 +1617,19 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                       <span>View in Purchase Reconciliation</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setShowImportModal(false);
-                      if (onNavigate) onNavigate("invoices");
-                    }}
-                  >
-                    <ExternalLink size={14} />
-                    <span>View in Invoice Master</span>
-                  </button>
+                  {selectedReturn !== "gstr3b" && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowImportModal(false);
+                        if (onNavigate) onNavigate("invoices");
+                      }}
+                    >
+                      <ExternalLink size={14} />
+                      <span>View in Invoice Master</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-secondary"
@@ -1438,6 +1639,13 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                   </button>
                 </div>
               </div>
+            ) : selectedReturn === "gstr3b" && previewData ? (
+              <Gstr3bImportPreview
+                previewData={previewData}
+                onCancel={() => setShowImportModal(false)}
+                onConfirm={handleExecuteImport}
+                confirmLoading={confirmLoading}
+              />
             ) : previewData ? (
               /* PREVIEW BREAKDOWN & CONFIRMATION */
               <div>
@@ -1564,10 +1772,9 @@ export function GstApiPage({ activeBusiness, onImportSuccess, onNavigate }) {
                   </div>
                 )}
 
-                {/* Concurrency note */}
+                {/* Import behavior note */}
                 <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 16 }}>
-                  * Deduplication relies on application-level checks on (invoice_no, business_id, source).
-                  Repeated imports are idempotent.
+                  * Repeated imports skip active records with the same invoice number and source for this business.
                 </div>
 
                 {/* Footer Buttons */}
